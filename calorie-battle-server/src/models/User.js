@@ -31,6 +31,11 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(500),
     allowNull: true,
   },
+  email: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    unique: true,
+  },
   status: {
     // ENUM('active', 'locked', 'disabled')
     type: DataTypes.STRING,

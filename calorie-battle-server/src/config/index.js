@@ -34,4 +34,13 @@ module.exports = {
     dir: process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads'),
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 10485760,
   },
+
+  smtp: {
+    host: process.env.SMTP_HOST || 'smtp.feishu.cn',
+    port: parseInt(process.env.SMTP_PORT, 10) || 465,
+    secure: true,
+    user: process.env.SMTP_USER || 'noreply@yogdunana.com',
+    pass: process.env.SMTP_PASS || '',
+    from: `"卡路里大作战" <${process.env.SMTP_USER || 'noreply@yogdunana.com'}>`,
+  },
 };

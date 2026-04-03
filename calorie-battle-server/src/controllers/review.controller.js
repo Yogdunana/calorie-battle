@@ -2,6 +2,8 @@ const { Checkin, Task, User, sequelize } = require('../models');
 const { success, error } = require('../utils/response');
 const { getPagination, getPagingData } = require('../utils/pagination');
 const pointsService = require('../services/points.service');
+const mailService = require('../services/mail.service');
+const dayjs = require('dayjs');
 
 const getPendingReviews = async (req, res, next) => {
   try {
@@ -90,6 +92,20 @@ const approveReview = async (req, res, next) => {
 
       await t.commit();
 
+      // 发送审核通过邮件通知（异步，不阻塞响应）
+      try {
+        const user = await User.findByPk(checkin.user_id, { attributes: ['id', 'email', 'username'] });
+        if (user && user.email) {
+          mailService.sendApprovalNotice(user.email, {
+            taskName: checkin.task ? checkin.task.name : '未知任务',
+            points: pointsAwarded,
+            date: dayjs(checkin.created_at).format('YYYY-MM-DD HH:mm'),
+          }).catch(() => {});
+        }
+      } catch (e) {
+        console.error('[Mail] 审核通过通知发送失败:', e.message);
+      }
+
       req.auditLog = {
         action: 'approve_checkin',
         targetType: 'checkin',
@@ -132,6 +148,21 @@ const rejectReview = async (req, res, next) => {
       reviewed_by: reviewerId,
       reviewed_at: new Date(),
     });
+
+    // 发送审核驳回邮件通知（异步）
+    try {
+      const user = await User.findByPk(checkin.user_id, { attributes: ['id', 'email', 'username'] });
+      const task = await Task.findByPk(checkin.task_id, { attributes: ['name'] });
+      if (user && user.email) {
+        mailService.sendRejectionNotice(user.email, {
+          taskName: task ? task.name : '未知任务',
+          reason: reject_reason,
+          date: dayjs(checkin.created_at).format('YYYY-MM-DD HH:mm'),
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[Mail] 审核驳回通知发送失败:', e.message);
+    }
 
     req.auditLog = {
       action: 'reject_checkin',

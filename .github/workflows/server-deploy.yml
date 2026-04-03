@@ -34,7 +34,7 @@ jobs:
         run: |
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'DEPLOY'
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "SMTP_PASS='${{ secrets.SMTP_PASSWORD }}' bash -s" << 'DEPLOY'
           set -e
 
           echo "============================================"
@@ -107,7 +107,7 @@ jobs:
           JWT_SECRET=$(openssl rand -hex 32)
           JWT_REFRESH_SECRET=$(openssl rand -hex 32)
           ENV_FILE="/opt/calorie-battle/calorie-battle-server/.env"
-          printf 'PORT=3001\nNODE_ENV=production\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_NAME=calorie_battle\nDB_USER=calorie\nDB_PASS=Calorie2026Secure!\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nJWT_EXPIRES_IN=24h\nJWT_REFRESH_EXPIRES_IN=7d\nUPLOAD_DIR=/opt/calorie-battle/calorie-battle-server/uploads\nMAX_FILE_SIZE=10485760\n' "$JWT_SECRET" "$JWT_REFRESH_SECRET" > "$ENV_FILE"
+          printf 'PORT=3001\nNODE_ENV=production\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_NAME=calorie_battle\nDB_USER=calorie\nDB_PASS=Calorie2026Secure!\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nJWT_EXPIRES_IN=24h\nJWT_REFRESH_EXPIRES_IN=7d\nUPLOAD_DIR=/opt/calorie-battle/calorie-battle-server/uploads\nMAX_FILE_SIZE=10485760\nSMTP_HOST=smtp.feishu.cn\nSMTP_PORT=465\nSMTP_USER=noreply@yogdunana.com\nSMTP_PASS=%s\n' "$JWT_SECRET" "$JWT_REFRESH_SECRET" "$SMTP_PASS" > "$ENV_FILE"
           mkdir -p /opt/calorie-battle/calorie-battle-server/uploads
           echo "  环境变量配置完成 ✓"
           echo "  .env 内容:"

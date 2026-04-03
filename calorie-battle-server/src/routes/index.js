@@ -10,6 +10,7 @@ const redemptionRoutes = require('./redemption.routes');
 const weightPlanRoutes = require('./weightPlan.routes');
 const photoRoutes = require('./photo.routes');
 const adminRoutes = require('./admin.routes');
+const mailRoutes = require('./mail.routes');
 
 router.use('/auth', authRoutes);
 router.use('/checkin', checkinRoutes);
@@ -20,6 +21,7 @@ router.use('/redemption', redemptionRoutes);
 router.use('/weight-plan', weightPlanRoutes);
 router.use('/photo', photoRoutes);
 router.use('/admin', adminRoutes);
+router.use('/mail', mailRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

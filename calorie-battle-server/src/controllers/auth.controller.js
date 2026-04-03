@@ -3,10 +3,11 @@ const { hashPassword, comparePassword } = require('../utils/password');
 const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
 const { success, error } = require('../utils/response');
 const jwtConfig = require('../config/jwt');
+const mailService = require('../services/mail.service');
 
 const register = async (req, res, next) => {
   try {
-    const { account, username, password } = req.body;
+    const { account, username, password, email } = req.body;
 
     if (!account || !username || !password) {
       return error(res, 400, '账号、用户名和密码不能为空');
@@ -26,15 +27,43 @@ const register = async (req, res, next) => {
       return error(res, 400, '该用户名已被使用');
     }
 
+    // 如果提供了邮箱，检查是否已被使用
+    if (email) {
+      const existingEmail = await User.findOne({ where: { email } });
+      if (existingEmail) {
+        return error(res, 400, '该邮箱已被注册');
+      }
+    }
+
     const password_hash = await hashPassword(password);
 
     const user = await User.create({
       account,
       username,
       password_hash,
+      email: email || null,
       role: 'user',
       status: 'active',
     });
+
+    // 发送注册成功邮件
+    if (email) {
+      mailService.sendMail({
+        to: email,
+        subject: '【卡路里大作战】注册成功',
+        html: `
+          <div style="max-width:480px;margin:0 auto;padding:20px;font-family:'Microsoft YaHei',sans-serif;">
+            <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px 12px 0 0;padding:30px;text-align:center;">
+              <h1 style="color:#fff;margin:0;font-size:24px;">🎉 欢迎加入卡路里大作战！</h1>
+            </div>
+            <div style="background:#fff;border:1px solid #e8e8e8;border-top:none;border-radius:0 0 12px 12px;padding:30px;">
+              <p style="color:#333;font-size:15px;">您好 <strong>${username}</strong>，您已成功注册！</p>
+              <p style="color:#666;font-size:14px;">开始您的健身之旅吧，完成每日打卡任务赢取积分！💪</p>
+            </div>
+          </div>
+        `,
+      }).catch(() => {});
+    }
 
     const payload = { id: user.id, role: user.role, account: user.account };
     const { accessToken, refreshToken } = generateTokens(payload);
@@ -54,6 +83,7 @@ const register = async (req, res, next) => {
         account: user.account,
         username: user.username,
         role: user.role,
+        email: user.email,
       },
     }, '注册成功');
   } catch (err) {
