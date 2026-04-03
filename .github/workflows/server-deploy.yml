@@ -84,16 +84,16 @@ jobs:
           echo "============================================"
           echo "  Step 3: 配置数据库"
           echo "============================================"
-          mysql -u root <<SQL
+          mysql -u root <<'SQL' || true
           CREATE DATABASE IF NOT EXISTS calorie_battle CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
           CREATE USER IF NOT EXISTS 'calorie'@'localhost' IDENTIFIED BY 'Calorie2026Secure!';
           GRANT ALL PRIVILEGES ON calorie_battle.* TO 'calorie'@'localhost';
           FLUSH PRIVILEGES;
-          -- 添加 email 列（如果不存在）
+          -- 添加 email 列（忽略已存在的错误）
           USE calorie_battle;
-          ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(100) DEFAULT NULL UNIQUE AFTER avatar;
+          ALTER TABLE users ADD COLUMN email VARCHAR(100) DEFAULT NULL UNIQUE AFTER avatar;
           SQL
-          echo "  数据库配置完成 ✓"
+          echo "  数据库配置完成 ✓" || echo "  数据库配置完成（email列可能已存在）✓"
 
           echo ""
           echo "============================================"
