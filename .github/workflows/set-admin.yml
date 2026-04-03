@@ -1,4 +1,4 @@
-name: Set Admin V3
+name: Set Admin V4
 
 on:
   workflow_dispatch:
@@ -12,44 +12,62 @@ jobs:
       - run: |
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
-          # 从PM2环境变量中获取数据库配置
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'OUTER_EOF'
           cd /opt/calorie-battle/calorie-battle-server
-          eval $(pm2 env 0 2>/dev/null | grep -E "^(DB_HOST|DB_PORT|DB_NAME|DB_USER|DB_PASS)=")
 
-          echo "DB_HOST=$DB_HOST"
-          echo "DB_NAME=$DB_NAME"
-          echo "DB_USER=$DB_USER"
-
-          if [ -z "$DB_HOST" ]; then
-            echo "ERROR: DB环境变量未找到，尝试从.env读取"
-            if [ -f .env ]; then
-              source .env
-              echo "DB_HOST=$DB_HOST"
-            else
-              echo "ERROR: 无.env文件"
-              exit 1
-            fi
+          # 读取.env文件中的DB配置
+          if [ -f .env ]; then
+            export $(grep -v '^#' .env | grep -v '^$' | xargs)
           fi
 
-          echo ""
-          echo "=== 当前admin账号 ==="
-          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT account, username, role, status FROM Users WHERE role='admin';" 2>/dev/null
+          echo "DB_HOST=${DB_HOST:-not set}"
+          echo "DB_NAME=${DB_NAME:-not set}"
 
-          echo ""
-          echo "=== 1120240002 当前状态 ==="
-          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT account, username, role, status FROM Users WHERE account='1120240002';" 2>/dev/null
+          # 用Node.js直接操作数据库
+          node -e "
+          require('dotenv').config();
+          const config = require('./src/config');
+          const { Sequelize } = require('sequelize');
 
-          echo ""
-          echo "=== 操作 ==="
-          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "
-            UPDATE Users SET role='admin', status='active' WHERE account='1120240002';
-            DELETE FROM Users WHERE account='admin';
-          " 2>/dev/null
+          // 创建临时sequelize实例
+          let sequelize;
+          if (config.db.dialect === 'mysql') {
+            sequelize = new Sequelize(config.db.name, config.db.user, config.db.password, {
+              host: config.db.host,
+              port: config.db.port,
+              dialect: 'mysql',
+              logging: false
+            });
+          } else {
+            sequelize = new Sequelize({ dialect: 'sqlite', storage: config.db.storage, logging: false });
+          }
 
-          echo ""
-          echo "=== 验证 ==="
-          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT account, username, role, status FROM Users WHERE role='admin';" 2>/dev/null
+          (async () => {
+            try {
+              const [results] = await sequelize.query('SELECT account, username, role, status FROM Users WHERE role = \"admin\"');
+              console.log('当前admin:', JSON.stringify(results));
+
+              const [user] = await sequelize.query('SELECT account, username, role, status FROM Users WHERE account = \"1120240002\"');
+              console.log('1120240002:', JSON.stringify(user));
+
+              if (user.length > 0) {
+                await sequelize.query('UPDATE Users SET role = \"admin\", status = \"active\" WHERE account = \"1120240002\"');
+                console.log('已将1120240002设为admin');
+              } else {
+                console.log('1120240002不存在，请先注册该账号');
+              }
+
+              await sequelize.query('DELETE FROM Users WHERE account = \"admin\" AND account != \"1120240002\"');
+              console.log('已删除旧admin账号');
+
+              const [final] = await sequelize.query('SELECT account, username, role, status FROM Users WHERE role = \"admin\"');
+              console.log('最终admin列表:', JSON.stringify(final));
+            } catch(e) {
+              console.error('Error:', e.message);
+            }
+            process.exit(0);
+          })();
+          "
 
           echo ""
           echo "=== 重启后端 ==="
@@ -62,4 +80,4 @@ jobs:
 
           echo ""
           echo "=== DONE ==="
-          EOF
+          OUTER_EOF
