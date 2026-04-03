@@ -1,0 +1,41 @@
+name: Diagnose Ports
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          echo "=== Nginx 监听端口 ==="
+          ss -tlnp | grep nginx || echo "Nginx 未运行"
+          echo ""
+          echo "=== 所有监听端口 ==="
+          ss -tlnp | grep -E ":(80|443|8080|3001) "
+          echo ""
+          echo "=== iptables 规则 ==="
+          iptables -L -n 2>/dev/null | head -30 || echo "无 iptables"
+          echo ""
+          echo "=== nftables 规则 ==="
+          nft list ruleset 2>/dev/null | head -30 || echo "无 nftables"
+          echo ""
+          echo "=== UFW 状态 ==="
+          ufw status 2>/dev/null || echo "无 UFW"
+          echo ""
+          echo "=== firewalld ==="
+          firewall-cmd --list-all 2>/dev/null || echo "无 firewalld"
+          echo ""
+          echo "=== Nginx 配置测试 ==="
+          nginx -t 2>&1
+          echo ""
+          echo "=== curl 本地测试 ==="
+          curl -s -o /dev/null -w "80: HTTP %{http_code}\n" http://127.0.0.1:80/ 2>&1 || true
+          curl -s -o /dev/null -w "443: HTTP %{http_code}\n" https://127.0.0.1:443/ -k 2>&1 || true
+          curl -s -o /dev/null -w "8080: HTTP %{http_code}\n" http://127.0.0.1:8080/ 2>&1 || true
+          EOF
