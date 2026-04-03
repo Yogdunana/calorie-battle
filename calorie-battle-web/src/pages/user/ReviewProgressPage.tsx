@@ -1,14 +1,374 @@
-import React from 'react';
-import { Typography } from 'antd';
+import React, { useState, useMemo } from 'react';
+import {
+  Typography,
+  Card,
+  Tag,
+  Image,
+  Segmented,
+  Pagination,
+  Spin,
+  Empty,
+  Descriptions,
+  Space,
+  Tooltip,
+} from 'antd';
+import {
+  ClockCircleOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  TrophyOutlined,
+  FileSearchOutlined,
+} from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
+import { checkinApi } from '@/services/checkinApi';
+import { UPLOAD_BASE_URL, STATUS_COLORS } from '@/utils/constants';
+import { formatDateTime, getStatusText } from '@/utils/format';
+import type { Checkin, CheckinStatus } from '@/types/checkin.types';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
+
+/** 状态筛选选项 */
+const STATUS_FILTER_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: '待审核', value: 'pending' },
+  { label: '已通过', value: 'approved' },
+  { label: '已驳回', value: 'rejected' },
+];
+
+/** 状态图标映射 */
+const STATUS_ICON_MAP: Record<string, React.ReactNode> = {
+  pending: <ClockCircleOutlined />,
+  approved: <CheckCircleOutlined />,
+  rejected: <CloseCircleOutlined />,
+};
 
 const ReviewProgressPage: React.FC = () => {
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+
+  // 获取打卡记录列表
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['my-checkins', statusFilter, page, pageSize],
+    queryFn: async () => {
+      const params: Record<string, any> = {
+        page,
+        pageSize,
+      };
+      if (statusFilter) {
+        params.status = statusFilter;
+      }
+      const res = await checkinApi.getMyCheckins(params);
+      return res.data;
+    },
+  });
+
+  const checkinList = data?.list || [];
+  const pagination = data?.pagination;
+
+  // 解析图片URL列表
+  const getImageUrls = (checkin: Checkin): string[] => {
+    if (checkin.images && checkin.images.length > 0) {
+      return checkin.images.map((img) =>
+        img.startsWith('http') ? img : `${UPLOAD_BASE_URL}/${img}`
+      );
+    }
+    if (checkin.image_url) {
+      return [
+        checkin.image_url.startsWith('http')
+          ? checkin.image_url
+          : `${UPLOAD_BASE_URL}/${checkin.image_url}`,
+      ];
+    }
+    return [];
+  };
+
+  // 解析提交数据
+  const parseSubmitData = (submitData?: string): Record<string, any> => {
+    if (!submitData) return {};
+    try {
+      return JSON.parse(submitData);
+    } catch {
+      return {};
+    }
+  };
+
+  // 获取任务名称
+  const getTaskName = (checkin: Checkin): string => {
+    if (checkin.task?.name) return checkin.task.name;
+    if (checkin.task_name) return checkin.task_name;
+    return '未知活动';
+  };
+
+  // 获取任务分类
+  const getTaskCategory = (checkin: Checkin): string => {
+    if (checkin.task?.category) return checkin.task.category;
+    if (checkin.task_category) return checkin.task_category;
+    return '';
+  };
+
+  // 获取积分
+  const getPoints = (checkin: Checkin): number | null => {
+    if (checkin.points_awarded !== undefined && checkin.points_awarded !== null) {
+      return checkin.points_awarded;
+    }
+    if (checkin.points !== undefined && checkin.points !== null) {
+      return checkin.points;
+    }
+    return null;
+  };
+
+  // 统计数据
+  const stats = useMemo(() => {
+    if (!data?.list) return { total: 0, pending: 0, approved: 0, rejected: 0 };
+    const list = data.list;
+    return {
+      total: list.length,
+      pending: list.filter((c) => c.status === 'pending').length,
+      approved: list.filter((c) => c.status === 'approved').length,
+      rejected: list.filter((c) => c.status === 'rejected').length,
+    };
+  }, [data]);
+
+  // 分页变更
+  const handlePageChange = (newPage: number, newPageSize: number) => {
+    setPage(newPage);
+  };
+
+  // 状态筛选变更
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setPage(1); // 切换筛选时重置页码
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
         <Title level={3}>审核进度</Title>
       </div>
+
+      {/* 统计卡片 */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        <Card size="small" variant="borderless" style={{ background: '#f6f8fa', textAlign: 'center' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>全部记录</Text>
+          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+            {pagination?.total ?? 0}
+          </div>
+        </Card>
+        <Card size="small" variant="borderless" style={{ background: '#e6f4ff', textAlign: 'center' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>待审核</Text>
+          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: '#1677ff' }}>
+            {stats.pending}
+          </div>
+        </Card>
+        <Card size="small" variant="borderless" style={{ background: '#f6ffed', textAlign: 'center' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>已通过</Text>
+          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: '#52c41a' }}>
+            {stats.approved}
+          </div>
+        </Card>
+        <Card size="small" variant="borderless" style={{ background: '#fff2f0', textAlign: 'center' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>已驳回</Text>
+          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4, color: '#ff4d4f' }}>
+            {stats.rejected}
+          </div>
+        </Card>
+      </div>
+
+      {/* 状态筛选 */}
+      <div style={{ marginBottom: 16 }}>
+        <Segmented
+          options={STATUS_FILTER_OPTIONS}
+          value={statusFilter}
+          onChange={handleStatusChange}
+          block
+        />
+      </div>
+
+      {/* 打卡记录列表 */}
+      {isLoading ? (
+        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <Spin size="large" tip="加载中..." />
+        </div>
+      ) : isError || checkinList.length === 0 ? (
+        <Empty
+          description={isError ? '加载失败，请稍后重试' : '暂无打卡记录'}
+          style={{ padding: '60px 0' }}
+        />
+      ) : (
+        <>
+          <Image.PreviewGroup>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {checkinList.map((checkin) => {
+                const imageUrls = getImageUrls(checkin);
+                const submitData = parseSubmitData(checkin.submit_data);
+                const points = getPoints(checkin);
+                const taskName = getTaskName(checkin);
+                const taskCategory = getTaskCategory(checkin);
+                const statusColor = STATUS_COLORS[checkin.status] || 'default';
+                const statusText = getStatusText(checkin.status);
+
+                return (
+                  <Card
+                    key={checkin.id}
+                    size="small"
+                    hoverable
+                    style={{ borderRadius: 8 }}
+                  >
+                    {/* 卡片头部：状态 + 活动名 + 时间 */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <Space size={8} align="center">
+                          <Tag
+                            color={statusColor}
+                            icon={STATUS_ICON_MAP[checkin.status]}
+                          >
+                            {statusText}
+                          </Tag>
+                          <Text strong style={{ fontSize: 15 }}>
+                            {taskName}
+                          </Text>
+                          {taskCategory && (
+                            <Tag>{taskCategory}</Tag>
+                          )}
+                        </Space>
+                        <div style={{ marginTop: 4 }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            提交时间：{formatDateTime(checkin.created_at)}
+                          </Text>
+                        </div>
+                      </div>
+
+                      {/* 积分展示 */}
+                      {checkin.status === 'approved' && points !== null && (
+                        <Tooltip title="已获得积分">
+                          <Tag
+                            color="gold"
+                            icon={<TrophyOutlined />}
+                            style={{ fontSize: 14, padding: '2px 8px' }}
+                          >
+                            +{points}
+                          </Tag>
+                        </Tooltip>
+                      )}
+                    </div>
+
+                    {/* 凭证图片缩略图 */}
+                    {imageUrls.length > 0 && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 8,
+                          marginBottom: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        {imageUrls.map((url, idx) => (
+                          <Image
+                            key={idx}
+                            src={url}
+                            alt={`凭证 ${idx + 1}`}
+                            width={80}
+                            height={80}
+                            style={{
+                              objectFit: 'cover',
+                              borderRadius: 6,
+                              border: '1px solid #f0f0f0',
+                            }}
+                            fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNDAiIHk9IjQ0IiBmb250LXNpemU9IjEyIiBmaWxsPSIjYmZiZmJmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7lm77niYc8L3RleHQ+PC9zdmc+"
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 提交数据详情 */}
+                    {Object.keys(submitData).length > 0 && (
+                      <div
+                        style={{
+                          background: '#fafafa',
+                          borderRadius: 6,
+                          padding: '8px 12px',
+                          marginBottom: 12,
+                        }}
+                      >
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          打卡信息：
+                        </Text>
+                        <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                          {Object.entries(submitData).map(([key, value]) => (
+                            <Text key={key} style={{ fontSize: 13 }}>
+                              <Text type="secondary">{key}：</Text>
+                              <Text strong>{String(value)}</Text>
+                            </Text>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 驳回原因 */}
+                    {checkin.status === 'rejected' && checkin.reject_reason && (
+                      <div
+                        style={{
+                          background: '#fff2f0',
+                          border: '1px solid #ffccc7',
+                          borderRadius: 6,
+                          padding: '8px 12px',
+                        }}
+                      >
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          驳回原因：
+                        </Text>
+                        <div style={{ marginTop: 4 }}>
+                          <Text style={{ color: '#cf1322', fontSize: 13 }}>
+                            {checkin.reject_reason}
+                          </Text>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 审核时间 */}
+                    {checkin.reviewed_at && (
+                      <div style={{ marginTop: 8, textAlign: 'right' }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          审核时间：{formatDateTime(checkin.reviewed_at)}
+                        </Text>
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          </Image.PreviewGroup>
+
+          {/* 分页 */}
+          {pagination && pagination.totalPages > 1 && (
+            <div style={{ marginTop: 24, textAlign: 'center' }}>
+              <Pagination
+                current={pagination.page}
+                pageSize={pagination.pageSize}
+                total={pagination.total}
+                onChange={handlePageChange}
+                showSizeChanger={false}
+                showTotal={(total) => `共 ${total} 条记录`}
+              />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };
