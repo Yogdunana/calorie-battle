@@ -11,14 +11,14 @@ const seedAdmin = async () => {
   const password_hash = await hashPassword('admin123456');
 
   await User.create({
-    account: 'admin',
+    account: '1120240002',
     username: '管理员',
     password_hash,
     role: 'admin',
     status: 'active',
   });
 
-  console.log('[Seeder] Default admin account created (account: admin, password: admin123456)');
+  console.log('[Seeder] Default admin account created (account: 1120240002, password: admin123456)');
 };
 
 module.exports = seedAdmin;
