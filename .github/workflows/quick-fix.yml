@@ -1,0 +1,53 @@
+name: Quick Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - name: Diagnose and fix
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          echo "===1. Nginx进程==="
+          ps aux | grep nginx | grep -v grep | head -2
+          echo ""
+          echo "===2. 监听端口==="
+          ss -tlnp | grep -E ":(80|443|8080|3001) "
+          echo ""
+          echo "===3. 本地curl==="
+          curl -sk -o /dev/null -w "443:%{http_code} " https://127.0.0.1:443/ 2>/dev/null || echo "443:FAIL "
+          curl -s -o /dev/null -w "80:%{http_code} " http://127.0.0.1:80/ 2>/dev/null || echo "80:FAIL "
+          curl -s -o /dev/null -w "8080:%{http_code} " http://127.0.0.1:8080/ 2>/dev/null || echo "8080:FAIL "
+          curl -s -o /dev/null -w "3001:%{http_code}" http://127.0.0.1:3001/api/v1/health 2>/dev/null || echo "3001:FAIL"
+          echo ""
+          echo "===4. PM2==="
+          pm2 status 2>/dev/null || echo "PM2未运行"
+          echo ""
+          echo "===5. SSL证书==="
+          ls /etc/letsencrypt/live/calorie.yogdunana.cn/ 2>/dev/null || echo "无证书"
+          echo ""
+          echo "===6. iptables==="
+          iptables -L INPUT -n 2>/dev/null | head -10 || echo "无iptables"
+          echo ""
+          echo "===7. 修复Nginx==="
+          nginx -t 2>&1
+          systemctl restart nginx 2>&1 || service nginx restart 2>&1
+          sleep 2
+          echo "===8. 修复后端口==="
+          ss -tlnp | grep -E ":(80|443|8080) "
+          echo ""
+          echo "===9. 修复后curl==="
+          curl -sk -o /dev/null -w "443:%{http_code} " https://127.0.0.1:443/ 2>/dev/null || echo "443:FAIL "
+          curl -s -o /dev/null -w "80:%{http_code} " http://127.0.0.1:80/ 2>/dev/null || echo "80:FAIL "
+          curl -s -o /dev/null -w "8080:%{http_code}" http://127.0.0.1:8080/ 2>/dev/null || echo "8080:FAIL"
+          echo ""
+          echo "===10. 外部端口测试(从服务器出)==="
+          timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/443' 2>/dev/null && echo "443:可连接" || echo "443:不可连接"
+          timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/80' 2>/dev/null && echo "80:可连接" || echo "80:不可连接"
+          EOF

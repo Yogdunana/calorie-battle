@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Form, Input, Button, Typography, message, Space } from 'antd';
-import { UserOutlined, LockOutlined, SafetyCertificateOutlined, ReloadOutlined } from '@ant-design/icons';
+import React from 'react';
+import { Card, Form, Input, Button, Typography, message } from 'antd';
+import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import useAuth from '@/hooks/useAuth';
 import { validateAccount, validatePassword } from '@/utils/validate';
-import { request } from '@/services/api';
 
 const { Title, Text } = Typography;
 
@@ -12,32 +11,8 @@ const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, isLoggingIn } = useAuth();
   const [form] = Form.useForm();
-  const [captchaToken, setCaptchaToken] = useState('');
-  const [captchaQuestion, setCaptchaQuestion] = useState('');
-  const [captchaLoading, setCaptchaLoading] = useState(false);
 
-  const fetchCaptcha = useCallback(async () => {
-    setCaptchaLoading(true);
-    try {
-      const res = await request.get<{ captchaToken: string; question: string }>('/mail/captcha');
-      setCaptchaToken(res.data.captchaToken);
-      setCaptchaQuestion(res.data.question);
-    } catch {
-      message.error('获取验证题失败');
-    } finally {
-      setCaptchaLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchCaptcha();
-  }, [fetchCaptcha]);
-
-  const handleSubmit = async (values: {
-    account: string;
-    password: string;
-    captchaAnswer: string;
-  }) => {
+  const handleSubmit = async (values: { account: string; password: string }) => {
     const accountError = validateAccount(values.account);
     if (accountError) {
       message.error(accountError);
@@ -48,16 +23,7 @@ const LoginPage: React.FC = () => {
       message.error(passwordError);
       return;
     }
-    if (!values.captchaAnswer?.trim()) {
-      message.error('请输入验证题答案');
-      return;
-    }
-    login({
-      account: values.account,
-      password: values.password,
-      captchaToken,
-      captchaAnswer: values.captchaAnswer.trim(),
-    });
+    login(values);
   };
 
   return (
@@ -98,26 +64,6 @@ const LoginPage: React.FC = () => {
             rules={[{ required: true, message: '请输入密码' }]}
           >
             <Input.Password prefix={<LockOutlined />} placeholder="请输入密码" />
-          </Form.Item>
-
-          {/* 人机验证 */}
-          <Form.Item>
-            <Space.Compact style={{ width: '100%' }}>
-              <Input
-                prefix={<SafetyCertificateOutlined />}
-                placeholder={captchaQuestion || '加载中...'}
-                style={{ flex: 1 }}
-                disabled={!captchaQuestion}
-              />
-              <Button
-                icon={<ReloadOutlined />}
-                loading={captchaLoading}
-                onClick={fetchCaptcha}
-                disabled={captchaLoading}
-              >
-                换一题
-              </Button>
-            </Space.Compact>
           </Form.Item>
 
           <Form.Item>

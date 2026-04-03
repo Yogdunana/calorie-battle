@@ -19,8 +19,8 @@ function generateCode() {
 }
 
 // POST /api/v1/mail/send-code
-// 发送邮箱验证码（需人机验证）
-router.post('/send-code', captcha.requireCaptcha, async (req, res, next) => {
+// 发送邮箱验证码
+router.post('/send-code', async (req, res, next) => {
   try {
     const { email, type } = req.body;
 
