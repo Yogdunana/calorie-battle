@@ -5,10 +5,12 @@ on:
     branches: [main, develop]
     paths:
       - 'calorie-battle-web/**'
+      - '.github/workflows/ci-frontend.yml'
   pull_request:
     branches: [main]
     paths:
       - 'calorie-battle-web/**'
+  workflow_dispatch:
 
 jobs:
   build-and-check:
