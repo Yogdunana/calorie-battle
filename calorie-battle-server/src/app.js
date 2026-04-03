@@ -18,7 +18,7 @@ app.use(helmet());
 
 // CORS - restrict in production
 const corsOrigins = config.isProd
-  ? ['http://101.237.129.33:8080', 'http://localhost:8080', 'http://localhost:5173']
+  ? ['https://calorie.yogdunana.cn', 'http://calorie.yogdunana.cn', 'http://101.237.129.33:8080', 'http://localhost:8080', 'http://localhost:5173']
   : true;
 
 app.use(cors({
