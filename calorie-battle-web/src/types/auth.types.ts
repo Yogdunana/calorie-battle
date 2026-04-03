@@ -18,6 +18,8 @@ export interface User {
 export interface LoginRequest {
   account: string;
   password: string;
+  captchaToken?: string;
+  captchaAnswer?: string;
 }
 
 export interface RegisterRequest {
@@ -25,6 +27,8 @@ export interface RegisterRequest {
   username: string;
   password: string;
   confirmPassword?: string;
+  captchaToken?: string;
+  captchaAnswer?: string;
 }
 
 export interface LoginResponse {

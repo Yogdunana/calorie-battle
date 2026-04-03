@@ -19,7 +19,12 @@ const register = async (req, res, next) => {
     const { account, username, password, email } = req.body;
 
     if (!account || !username || !password) {
-      return error(res, 400, '账号、用户名和密码不能为空');
+      return error(res, 400, '学号、姓名和密码不能为空');
+    }
+
+    // 学号验证：固定10位数字
+    if (!/^\d{10}$/.test(account)) {
+      return error(res, 400, '学号必须为10位数字（如：1120240002）');
     }
 
     const pwdError = validatePassword(password);
@@ -106,12 +111,12 @@ const login = async (req, res, next) => {
     const { account, password } = req.body;
 
     if (!account || !password) {
-      return error(res, 400, '账号和密码不能为空');
+      return error(res, 400, '学号和密码不能为空');
     }
 
     const user = await User.findOne({ where: { account } });
     if (!user) {
-      return error(res, 400, '账号或密码错误');
+      return error(res, 400, '学号或密码错误');
     }
 
     if (user.status === 'disabled') {
