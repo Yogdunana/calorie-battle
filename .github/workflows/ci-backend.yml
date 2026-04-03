@@ -69,7 +69,7 @@ jobs:
             const sequelize = require('./src/config/database');
             sequelize.authenticate()
               .then(() => console.log('MySQL connected successfully'))
-              .then(() => sequelize.sync({ force: true }))
+              .then(() => sequelize.sync({ alter: true, logging: console.log }))
               .then(async () => {
                 console.log('All tables synced');
                 const [results] = await sequelize.query('SHOW TABLES');
