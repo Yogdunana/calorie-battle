@@ -1,0 +1,51 @@
+name: Debug Blank
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          echo "===1. dist目录==="
+          ls -la /opt/calorie-battle/calorie-battle-web/dist/ 2>/dev/null | head -10 || echo "dist不存在!"
+          echo ""
+          echo "===2. dist/index.html==="
+          head -5 /opt/calorie-battle/calorie-battle-web/dist/index.html 2>/dev/null || echo "index.html不存在!"
+          echo ""
+          echo "===3. 前端源码==="
+          ls /opt/calorie-battle/calorie-battle-web/package.json 2>/dev/null && echo "有package.json" || echo "无package.json"
+          ls /opt/calorie-battle/calorie-battle-web/.env.production 2>/dev/null && echo "有.env.production" || echo "无.env.production"
+          echo ""
+          echo "===4. node_modules==="
+          ls /opt/calorie-battle/calorie-battle-web/node_modules/.package-lock.json 2>/dev/null && echo "有node_modules" || echo "无node_modules"
+          echo ""
+          echo "===5. 尝试构建前端==="
+          cd /opt/calorie-battle/calorie-battle-web
+          npm install 2>&1 | tail -3
+          npm run build 2>&1 | tail -10
+          echo ""
+          echo "===6. 构建后dist==="
+          ls -la /opt/calorie-battle/calorie-battle-web/dist/ 2>/dev/null | head -10
+          echo ""
+          echo "===7. dist中的JS文件==="
+          ls /opt/calorie-battle/calorie-battle-web/dist/assets/*.js 2>/dev/null | head -5 || echo "无JS文件"
+          echo ""
+          echo "===8. 检查JS中的API地址==="
+          grep -o 'localhost' /opt/calorie-battle/calorie-battle-web/dist/assets/*.js 2>/dev/null | head -3 || echo "无localhost引用"
+          echo ""
+          echo "===9. 重启Nginx==="
+          systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null
+          echo ""
+          echo "===10. curl测试==="
+          curl -s http://127.0.0.1:8080/ | head -5
+          echo ""
+          echo "===11. curl API测试==="
+          curl -s http://127.0.0.1:8080/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"admin","password":"admin123456"}' | head -100
+          EOF
