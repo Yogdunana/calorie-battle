@@ -1,0 +1,111 @@
+name: Fix Ports
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - name: Check and fix
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          # 1. 检查当前配置
+          echo "---CONFIG---"
+          head -3 /etc/nginx/sites-available/calorie-battle
+          echo "---CERT---"
+          ls /etc/letsencrypt/live/calorie.yogdunana.cn/ 2>/dev/null || echo "NO_CERT"
+          echo "---PORTS---"
+          ss -tlnp | grep nginx
+          echo "---TEST---"
+          curl -sk -o /dev/null -w "%{http_code}" https://127.0.0.1:443/ 2>/dev/null || echo "FAIL_443"
+          curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:80/ 2>/dev/null || echo "FAIL_80"
+          echo ""
+          echo "---RELOAD---"
+          # 如果443不通，重新写配置并reload
+          RESULT443=$(curl -sk -o /dev/null -w "%{http_code}" https://127.0.0.1:443/ 2>/dev/null)
+          if [ "$RESULT443" != "200" ]; then
+            echo "443不通，重新配置..."
+            # 检查证书
+            if [ ! -f /etc/letsencrypt/live/calorie.yogdunana.cn/fullchain.pem ]; then
+              echo "证书不存在，重新申请..."
+              systemctl stop nginx
+              certbot certonly --standalone -d calorie.yogdunana.cn --non-interactive --agree-tos --email noreply@yogdunana.com --no-eff-email
+            fi
+            # 重写配置
+            cat > /etc/nginx/sites-available/calorie-battle << 'NGINX'
+          server {
+              listen 80;
+              server_name calorie.yogdunana.cn;
+              return 301 https://$host$request_uri;
+          }
+          server {
+              listen 443 ssl http2;
+              server_name calorie.yogdunana.cn;
+              ssl_certificate /etc/letsencrypt/live/calorie.yogdunana.cn/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/calorie.yogdunana.cn/privkey.pem;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              add_header Strict-Transport-Security "max-age=31536000" always;
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  client_max_body_size 10M;
+              }
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          server {
+              listen 8080;
+              server_name _;
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  client_max_body_size 10M;
+              }
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          NGINX
+            nginx -t 2>&1
+            systemctl reload nginx 2>&1
+            sleep 2
+          fi
+          echo "---FINAL---"
+          ss -tlnp | grep nginx
+          curl -sk -o /dev/null -w "443:%{http_code}" https://127.0.0.1:443/
+          curl -s -o /dev/null -w " 80:%{http_code}" http://127.0.0.1:80/
+          curl -s -o /dev/null -w " 8080:%{http_code}" http://127.0.0.1:8080/
+          echo ""
+          EOF
