@@ -1,0 +1,57 @@
+name: Real Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          echo "=== 1. 当前dist的JS文件 ==="
+          ls -la /opt/calorie-battle/calorie-battle-web/dist/assets/ 2>/dev/null | head -10
+
+          echo ""
+          echo "=== 2. Nginx返回的HTML ==="
+          curl -s http://127.0.0.1:8080/
+
+          echo ""
+          echo "=== 3. dist/index.html ==="
+          cat /opt/calorie-battle/calorie-battle-web/dist/index.html
+
+          echo ""
+          echo "=== 4. 实际JS文件是否存在 ==="
+          JSFILE=$(grep -oh '/assets/index-[^"]*' /opt/calorie-battle/calorie-battle-web/dist/index.html 2>/dev/null)
+          echo "HTML引用: $JSFILE"
+          ls -la /opt/calorie-battle/calorie-battle-web/dist$JSFILE 2>/dev/null || echo "JS文件不存在!"
+
+          echo ""
+          echo "=== 5. CSS文件 ==="
+          CSSFILE=$(grep -oh '/assets/index-[^"]*\.css' /opt/calorie-battle/calorie-battle-web/dist/index.html 2>/dev/null)
+          echo "CSS引用: $CSSFILE"
+          ls -la /opt/calorie-battle/calorie-battle-web/dist$CSSFILE 2>/dev/null || echo "CSS文件不存在!"
+
+          echo ""
+          echo "=== 6. 重新构建+重启 ==="
+          cd /opt/calorie-battle/calorie-battle-web
+          rm -rf dist
+          npx vite build --mode production 2>&1 | tail -5
+          systemctl restart nginx
+          sleep 1
+
+          echo ""
+          echo "=== 7. 重建后验证 ==="
+          JSFILE2=$(grep -oh '/assets/index-[^"]*' dist/index.html 2>/dev/null)
+          echo "新JS: $JSFILE2"
+          ls -la dist$JSFILE2 2>/dev/null && echo "JS存在✓" || echo "JS不存在✗"
+          curl -s -o /dev/null -w "HTML: %{http_code}\n" http://127.0.0.1:8080/
+          curl -s -o /dev/null -w "JS: %{http_code}\n" http://127.0.0.1:8080$JSFILE2
+          curl -s -o /dev/null -w "API: %{http_code}\n" http://127.0.0.1:8080/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"admin","password":"admin123456"}'
+          echo ""
+          echo "=== DONE ==="
+          EOF
