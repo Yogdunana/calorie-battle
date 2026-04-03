@@ -5,6 +5,15 @@ const { success, error } = require('../utils/response');
 const jwtConfig = require('../config/jwt');
 const mailService = require('../services/mail.service');
 
+// 密码强度校验
+function validatePassword(password) {
+  if (password.length < 6) return '密码长度不能少于6位';
+  if (password.length > 32) return '密码长度不能超过32位';
+  if (!/[a-zA-Z]/.test(password)) return '密码需包含至少一个字母';
+  if (!/[0-9]/.test(password)) return '密码需包含至少一个数字';
+  return null;
+}
+
 const register = async (req, res, next) => {
   try {
     const { account, username, password, email } = req.body;
@@ -13,8 +22,9 @@ const register = async (req, res, next) => {
       return error(res, 400, '账号、用户名和密码不能为空');
     }
 
-    if (password.length < 6) {
-      return error(res, 400, '密码长度不能少于6位');
+    const pwdError = validatePassword(password);
+    if (pwdError) {
+      return error(res, 400, pwdError);
     }
 
     const existingAccount = await User.findOne({ where: { account } });
@@ -224,8 +234,9 @@ const resetPassword = async (req, res, next) => {
       return error(res, 400, '账号和新密码不能为空');
     }
 
-    if (new_password.length < 6) {
-      return error(res, 400, '密码长度不能少于6位');
+    const pwdError = validatePassword(new_password);
+    if (pwdError) {
+      return error(res, 400, pwdError);
     }
 
     const user = await User.findOne({ where: { account } });
@@ -255,8 +266,9 @@ const changePassword = async (req, res, next) => {
       return error(res, 400, '旧密码和新密码不能为空');
     }
 
-    if (new_password.length < 6) {
-      return error(res, 400, '新密码长度不能少于6位');
+    const pwdError = validatePassword(new_password);
+    if (pwdError) {
+      return error(res, 400, pwdError);
     }
 
     const user = await User.findByPk(req.user.id);

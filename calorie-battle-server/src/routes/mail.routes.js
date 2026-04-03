@@ -2,6 +2,13 @@ const { Router } = require('express');
 const router = Router();
 const { success, error } = require('../utils/response');
 const mailService = require('../services/mail.service');
+const captcha = require('../middleware/captcha');
+
+// GET /api/v1/mail/captcha - 获取人机验证题
+router.get('/captcha', (req, res) => {
+  const { captchaToken, question } = captcha.generate();
+  return success(res, { captchaToken, question }, '获取验证题成功');
+});
 
 // 内存存储验证码（生产环境可用 Redis 替换）
 const verifyCodes = new Map();
@@ -12,8 +19,8 @@ function generateCode() {
 }
 
 // POST /api/v1/mail/send-code
-// 发送邮箱验证码
-router.post('/send-code', async (req, res, next) => {
+// 发送邮箱验证码（需人机验证）
+router.post('/send-code', captcha.requireCaptcha, async (req, res, next) => {
   try {
     const { email, type } = req.body;
 

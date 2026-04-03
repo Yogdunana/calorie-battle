@@ -16,10 +16,16 @@ const app = express();
 // Security
 app.use(helmet());
 
-// CORS
+// CORS - restrict in production
+const corsOrigins = config.isProd
+  ? ['http://101.237.129.33:8080', 'http://localhost:8080', 'http://localhost:5173']
+  : true;
+
 app.use(cors({
-  origin: true,
+  origin: corsOrigins,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // Logging
@@ -32,6 +38,10 @@ if (config.isDev) {
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// XSS sanitization (after body parsing, before routes)
+const { sanitizeAll } = require('./middleware/sanitize');
+app.use(sanitizeAll);
 
 // Cookie parser
 app.use(cookieParser());
