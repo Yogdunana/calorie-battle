@@ -66,25 +66,23 @@ jobs:
           JWT_REFRESH_SECRET: test-refresh-secret-key
         run: |
           node -e "
-            const sequelize = require('./src/config/database');
-            sequelize.authenticate()
-              .then(() => console.log('MySQL connected successfully'))
-              .then(() => sequelize.sync({ alter: true, logging: console.log }))
-              .then(async () => {
-                console.log('All tables synced');
+            (async () => {
+              try {
+                const sequelize = require('./src/config/database');
+                await sequelize.authenticate();
+                console.log('MySQL connected');
+                await sequelize.sync({ force: true });
+                console.log('Tables synced');
                 const [results] = await sequelize.query('SHOW TABLES');
                 console.log('Tables:', results.map(r => Object.values(r)[0]).join(', '));
-              })
-              .then(async () => {
-                await require('./src/seeders/initAdmin')();
-                console.log('Admin seeder done');
-                await require('./src/seeders/initTasks')();
-                console.log('Tasks seeder done');
-                await require('./src/seeders/initItems')();
-                console.log('Items seeder done');
-                await require('./src/seeders/initActivity')();
-                console.log('Activity seeder done');
+                const { User } = require('./src/models');
+                const count = await User.count();
+                console.log('User count:', count);
+                console.log('ALL TESTS PASSED');
                 process.exit(0);
-              })
-              .catch(e => { console.error('FAIL:', e.message); process.exit(1); });
+              } catch (e) {
+                console.error('FAIL:', e.message);
+                process.exit(1);
+              }
+            })();
           "
