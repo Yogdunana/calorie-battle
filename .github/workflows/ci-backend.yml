@@ -64,7 +64,7 @@ jobs:
           JWT_REFRESH_SECRET: test-refresh-secret-key
         run: |
           node -e "
-            const { sequelize } = require('./src/config/database');
+            const sequelize = require('./src/config/database');
             sequelize.sync({ force: true }).then(async () => {
               console.log('DB connected and synced');
               await require('./src/seeders/initAdmin')();
