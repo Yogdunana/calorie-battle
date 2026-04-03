@@ -1,4 +1,4 @@
-name: Set Admin V2
+name: Set Admin V3
 
 on:
   workflow_dispatch:
@@ -13,39 +13,43 @@ jobs:
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          # 从PM2环境变量中获取数据库配置
           cd /opt/calorie-battle/calorie-battle-server
+          eval $(pm2 env 0 2>/dev/null | grep -E "^(DB_HOST|DB_PORT|DB_NAME|DB_USER|DB_PASS)=")
 
-          # 找到数据库文件
-          DBFILE=$(ls -t data/*.db 2>/dev/null | head -1)
-          if [ -z "$DBFILE" ]; then
-            DBFILE=$(find . -name "*.db" -not -path "./node_modules/*" | head -1)
-          fi
-          echo "Database: $DBFILE"
+          echo "DB_HOST=$DB_HOST"
+          echo "DB_NAME=$DB_NAME"
+          echo "DB_USER=$DB_USER"
 
-          if [ -z "$DBFILE" ]; then
-            echo "ERROR: No database found!"
-            exit 1
+          if [ -z "$DB_HOST" ]; then
+            echo "ERROR: DB环境变量未找到，尝试从.env读取"
+            if [ -f .env ]; then
+              source .env
+              echo "DB_HOST=$DB_HOST"
+            else
+              echo "ERROR: 无.env文件"
+              exit 1
+            fi
           fi
 
           echo ""
           echo "=== 当前admin账号 ==="
-          sqlite3 "$DBFILE" "SELECT account, username, role, status FROM Users WHERE role='admin';"
+          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT account, username, role, status FROM Users WHERE role='admin';" 2>/dev/null
 
           echo ""
           echo "=== 1120240002 当前状态 ==="
-          sqlite3 "$DBFILE" "SELECT account, username, role, status FROM Users WHERE account='1120240002';"
+          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT account, username, role, status FROM Users WHERE account='1120240002';" 2>/dev/null
 
           echo ""
-          echo "=== 操作：设置1120240002为admin，删除旧admin ==="
-          # 如果1120240002存在，更新为admin
-          sqlite3 "$DBFILE" "UPDATE Users SET role='admin', status='active' WHERE account='1120240002';"
-          # 如果不存在，不管（用户需要先注册）
-          # 删除旧的admin账号
-          sqlite3 "$DBFILE" "DELETE FROM Users WHERE account='admin';"
+          echo "=== 操作 ==="
+          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "
+            UPDATE Users SET role='admin', status='active' WHERE account='1120240002';
+            DELETE FROM Users WHERE account='admin';
+          " 2>/dev/null
 
           echo ""
-          echo "=== 验证结果 ==="
-          sqlite3 "$DBFILE" "SELECT account, username, role, status FROM Users WHERE role='admin';"
+          echo "=== 验证 ==="
+          mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT account, username, role, status FROM Users WHERE role='admin';" 2>/dev/null
 
           echo ""
           echo "=== 重启后端 ==="
