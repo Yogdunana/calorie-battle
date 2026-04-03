@@ -1,4 +1,4 @@
-name: Set Admin
+name: Set Admin V2
 
 on:
   workflow_dispatch:
@@ -15,54 +15,46 @@ jobs:
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
           cd /opt/calorie-battle/calorie-battle-server
 
-          echo "=== 1. 查看当前admin账号 ==="
-          node -e "
-          const { User } = require('./src/models');
-          (async () => {
-            const admins = await User.findAll({ where: { role: 'admin' } });
-            admins.forEach(u => console.log('Admin:', u.account, u.username, u.status));
-            const user = await User.findOne({ where: { account: '1120240002' } });
-            if (user) console.log('1120240002:', user.username, 'role='+user.role, 'status='+user.status);
-            else console.log('1120240002: 不存在');
-          })().then(() => process.exit(0));
-          "
+          # 找到数据库文件
+          DBFILE=$(ls -t data/*.db 2>/dev/null | head -1)
+          if [ -z "$DBFILE" ]; then
+            DBFILE=$(find . -name "*.db" -not -path "./node_modules/*" | head -1)
+          fi
+          echo "Database: $DBFILE"
+
+          if [ -z "$DBFILE" ]; then
+            echo "ERROR: No database found!"
+            exit 1
+          fi
 
           echo ""
-          echo "=== 2. 设置1120240002为管理员 ==="
-          node -e "
-          const { User } = require('./src/models');
-          (async () => {
-            // 如果1120240002不存在，先创建
-            let user = await User.findOne({ where: { account: '1120240002' } });
-            if (!user) {
-              const { hashPassword } = require('./src/utils/password');
-              const hash = await hashPassword('admin123456');
-              user = await User.create({ account: '1120240002', username: '管理员', password_hash: hash, role: 'admin', status: 'active' });
-              console.log('Created 1120240002 as admin');
-            } else {
-              await user.update({ role: 'admin', status: 'active' });
-              console.log('Updated 1120240002 to admin');
-            }
-            // 删除旧的admin账号
-            const oldAdmin = await User.findOne({ where: { account: 'admin' } });
-            if (oldAdmin) {
-              await oldAdmin.destroy();
-              console.log('Deleted old admin account');
-            }
-            // 验证
-            const admins = await User.findAll({ where: { role: 'admin' } });
-            console.log('Current admins:', admins.map(u => u.account + '(' + u.username + ')').join(', '));
-          })().then(() => process.exit(0));
-          "
+          echo "=== 当前admin账号 ==="
+          sqlite3 "$DBFILE" "SELECT account, username, role, status FROM Users WHERE role='admin';"
 
           echo ""
-          echo "=== 3. 重启后端 ==="
-          cd /opt/calorie-battle/calorie-battle-server && pm2 restart all 2>/dev/null || node src/server.js &
+          echo "=== 1120240002 当前状态 ==="
+          sqlite3 "$DBFILE" "SELECT account, username, role, status FROM Users WHERE account='1120240002';"
+
+          echo ""
+          echo "=== 操作：设置1120240002为admin，删除旧admin ==="
+          # 如果1120240002存在，更新为admin
+          sqlite3 "$DBFILE" "UPDATE Users SET role='admin', status='active' WHERE account='1120240002';"
+          # 如果不存在，不管（用户需要先注册）
+          # 删除旧的admin账号
+          sqlite3 "$DBFILE" "DELETE FROM Users WHERE account='admin';"
+
+          echo ""
+          echo "=== 验证结果 ==="
+          sqlite3 "$DBFILE" "SELECT account, username, role, status FROM Users WHERE role='admin';"
+
+          echo ""
+          echo "=== 重启后端 ==="
+          pm2 restart all 2>/dev/null
           sleep 3
 
           echo ""
-          echo "=== 4. 验证登录 ==="
-          curl -s http://127.0.0.1:3001/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"1120240002","password":"admin123456"}' | head -200
+          echo "=== 登录测试 ==="
+          curl -s http://127.0.0.1:3001/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"1120240002","password":"admin123456"}'
 
           echo ""
           echo "=== DONE ==="
