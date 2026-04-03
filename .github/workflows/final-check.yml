@@ -1,0 +1,41 @@
+name: Final Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          echo "=== .env文件 ==="
+          ls -la /opt/calorie-battle/calorie-battle-web/.env* 2>/dev/null || echo "无.env文件"
+          echo ""
+          echo "=== .env.production内容 ==="
+          cat /opt/calorie-battle/calorie-battle-web/.env.production 2>/dev/null || echo "不存在"
+          echo ""
+          echo "=== dist/index.html ==="
+          head -15 /opt/calorie-battle/calorie-battle-web/dist/index.html 2>/dev/null || echo "无dist"
+          echo ""
+          echo "=== JS中API地址 ==="
+          grep -oh 'VITE_API_BASE_URL[^,}]*' /opt/calorie-battle/calorie-battle-web/dist/assets/*.js 2>/dev/null | head -3
+          grep -oh '"\/api\/v1"' /opt/calorie-battle/calorie-battle-web/dist/assets/*.js 2>/dev/null | head -3
+          grep -oh 'localhost' /opt/calorie-battle/calorie-battle-web/dist/assets/*.js 2>/dev/null | head -3
+          echo ""
+          echo "=== 重新构建 ==="
+          cd /opt/calorie-battle/calorie-battle-web
+          rm -rf dist
+          npx vite build --mode production 2>&1
+          echo ""
+          echo "=== 构建后检查 ==="
+          grep -oh 'localhost' dist/assets/*.js 2>/dev/null | head -3 || echo "无localhost"
+          grep -oh '"/api/v1"' dist/assets/*.js 2>/dev/null | head -3 || echo "无相对路径"
+          echo ""
+          systemctl restart nginx
+          echo "=== done ==="
+          EOF
