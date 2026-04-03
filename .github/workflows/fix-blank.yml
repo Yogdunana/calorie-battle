@@ -1,0 +1,56 @@
+name: Fix Blank Page
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          cd /opt/calorie-battle/calorie-battle-web
+
+          echo "=== 检查.env文件 ==="
+          cat .env.production 2>/dev/null || echo "无.env.production"
+          cat .env 2>/dev/null || echo "无.env"
+          cat .env.development 2>/dev/null || echo "无.env.development"
+
+          echo ""
+          echo "=== 清理旧构建 ==="
+          rm -rf dist node_modules/.vite
+
+          echo ""
+          echo "=== 强制production模式构建 ==="
+          NODE_ENV=production npx vite build --mode production 2>&1
+
+          echo ""
+          echo "=== 检查构建结果 ==="
+          ls -la dist/assets/*.js 2>/dev/null | wc -l
+          echo "JS文件数量"
+
+          echo ""
+          echo "=== 检查API地址 ==="
+          grep -o 'http[s]*://[^"'\'']*' dist/assets/index-*.js 2>/dev/null | sort -u | head -5
+          grep -o 'http[s]*://[^"'\'']*' dist/assets/authApi-*.js 2>/dev/null | sort -u | head -5
+          echo "---"
+          grep -c 'localhost' dist/assets/*.js 2>/dev/null
+
+          echo ""
+          echo "=== 检查index.html引用的JS ==="
+          grep 'script' dist/index.html
+
+          echo ""
+          echo "=== 重启nginx ==="
+          systemctl restart nginx
+
+          echo ""
+          echo "=== 最终curl测试 ==="
+          curl -s http://127.0.0.1:8080/ | head -10
+          echo ""
+          curl -s -o /dev/null -w "API: %{http_code}\n" http://127.0.0.1:8080/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"admin","password":"admin123456"}'
+          EOF
