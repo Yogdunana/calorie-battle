@@ -1,0 +1,31 @@
+name: Find Localhost
+
+on:
+  workflow_dispatch:
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          cd /opt/calorie-battle/calorie-battle-web
+          echo "=== 哪些JS文件含localhost ==="
+          grep -l 'localhost' dist/assets/*.js 2>/dev/null
+          echo ""
+          echo "=== localhost上下文 ==="
+          grep -oh '.\{0,50\}localhost.\{0,50\}' dist/assets/*.js 2>/dev/null | head -10
+          echo ""
+          echo "=== index.js内容(前500字符) ==="
+          head -c 500 dist/assets/index-*.js 2>/dev/null
+          echo ""
+          echo "=== 检查VITE_API_BASE_URL ==="
+          grep -oh 'VITE_API[^,}]*' dist/assets/*.js 2>/dev/null | head -5
+          echo ""
+          echo "=== 检查baseURL ==="
+          grep -oh 'baseURL[^,}]*' dist/assets/*.js 2>/dev/null | head -5
+          EOF
