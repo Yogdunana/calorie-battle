@@ -213,6 +213,16 @@ const PcLayout: React.FC = () => {
         >
           <Outlet />
         </Content>
+        <div
+          style={{
+            textAlign: 'center',
+            padding: '12px 0',
+            color: '#999',
+            fontSize: 12,
+          }}
+        >
+          © 2025 深北莫计协 版权所有
+        </div>
       </Layout>
     </Layout>
   );

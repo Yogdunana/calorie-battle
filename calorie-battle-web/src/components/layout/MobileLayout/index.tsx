@@ -69,6 +69,18 @@ const MobileLayout: React.FC = () => {
 
       {/* 底部 TabBar */}
       <TabBar currentPath={location.pathname} onTabChange={(path) => navigate(path)} />
+      {/* 版权信息 */}
+      <div
+        style={{
+          textAlign: 'center',
+          padding: '4px 0 8px',
+          color: '#999',
+          fontSize: 10,
+          background: '#fff',
+        }}
+      >
+        © 2025 深北莫计协 版权所有
+      </div>
     </div>
   );
 };
