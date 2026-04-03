@@ -106,23 +106,12 @@ jobs:
           echo "============================================"
           JWT_SECRET=$(openssl rand -hex 32)
           JWT_REFRESH_SECRET=$(openssl rand -hex 32)
-          cat > /opt/calorie-battle/calorie-battle-server/.env <<EOF
-          PORT=3001
-          NODE_ENV=production
-          DB_HOST=127.0.0.1
-          DB_PORT=3306
-          DB_NAME=calorie_battle
-          DB_USER=calorie
-          DB_PASS=Calorie2026Secure!
-          JWT_SECRET=${JWT_SECRET}
-          JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-          JWT_EXPIRES_IN=24h
-          JWT_REFRESH_EXPIRES_IN=7d
-          UPLOAD_DIR=/opt/calorie-battle/calorie-battle-server/uploads
-          MAX_FILE_SIZE=10485760
-          EOF
+          ENV_FILE="/opt/calorie-battle/calorie-battle-server/.env"
+          printf 'PORT=3001\nNODE_ENV=production\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_NAME=calorie_battle\nDB_USER=calorie\nDB_PASS=Calorie2026Secure!\nJWT_SECRET=%s\nJWT_REFRESH_SECRET=%s\nJWT_EXPIRES_IN=24h\nJWT_REFRESH_EXPIRES_IN=7d\nUPLOAD_DIR=/opt/calorie-battle/calorie-battle-server/uploads\nMAX_FILE_SIZE=10485760\n' "$JWT_SECRET" "$JWT_REFRESH_SECRET" > "$ENV_FILE"
           mkdir -p /opt/calorie-battle/calorie-battle-server/uploads
           echo "  环境变量配置完成 ✓"
+          echo "  .env 内容:"
+          cat "$ENV_FILE"
 
           echo ""
           echo "============================================"
