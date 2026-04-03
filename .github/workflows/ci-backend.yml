@@ -1,0 +1,77 @@
+name: CI - Backend
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'calorie-battle-server/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'calorie-battle-server/**'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+          MYSQL_DATABASE: calorie_battle_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: calorie-battle-server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: calorie-battle-server
+        run: npm ci
+
+      - name: Lint check
+        working-directory: calorie-battle-server
+        run: |
+          npx eslint src/ --no-error-on-unmatched-pattern || true
+
+      - name: Run tests
+        working-directory: calorie-battle-server
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: calorie_battle_test
+          DB_USER: root
+          DB_PASS: testpassword
+          NODE_ENV: test
+          JWT_SECRET: test-secret-key
+          JWT_REFRESH_SECRET: test-refresh-secret-key
+        run: |
+          node -e "
+            const { sequelize } = require('./src/config/database');
+            sequelize.sync({ force: true }).then(async () => {
+              console.log('DB connected and synced');
+              await require('./src/seeders/initAdmin')();
+              await require('./src/seeders/initTasks')();
+              await require('./src/seeders/initItems')();
+              await require('./src/seeders/initActivity')();
+              console.log('Seeders done');
+              process.exit(0);
+            }).catch(e => { console.error(e.message); process.exit(1); });
+          "

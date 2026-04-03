@@ -1,0 +1,48 @@
+name: CI - Frontend
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'calorie-battle-web/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'calorie-battle-web/**'
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: calorie-battle-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: calorie-battle-web
+        run: npm ci --legacy-peer-deps
+
+      - name: TypeScript type check
+        working-directory: calorie-battle-web
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: calorie-battle-web
+        run: npx vite build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-${{ matrix.node-version }}
+          path: calorie-battle-web/dist/
+          retention-days: 7
