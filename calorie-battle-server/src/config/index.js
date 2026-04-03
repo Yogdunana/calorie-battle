@@ -1,16 +1,26 @@
 const path = require('path');
 
+// Auto-detect database dialect from environment
+const useMysql = !!process.env.DB_HOST;
+
 module.exports = {
   port: parseInt(process.env.PORT, 10) || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 
-  db: {
-    storage: process.env.DB_STORAGE || path.join(__dirname, '../../data/calorie_battle.db'),
+  db: useMysql ? {
+    // MySQL (production / CI)
+    dialect: 'mysql',
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT, 10) || 3306,
+    name: process.env.DB_NAME || 'calorie_battle',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASS || '',
+  } : {
+    // SQLite (local development)
     dialect: 'sqlite',
-    dialectModule: require('better-sqlite3'),
-    logging: false,
+    storage: process.env.DB_STORAGE || path.join(__dirname, '../../data/calorie_battle.db'),
   },
 
   jwt: {
