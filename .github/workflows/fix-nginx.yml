@@ -1,0 +1,43 @@
+name: Fix Nginx
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
+          echo "=== Nginx 状态 ==="
+          service nginx status 2>&1 || systemctl status nginx 2>&1 || true
+          echo ""
+          echo "=== Nginx 错误日志 ==="
+          tail -20 /var/log/nginx/error.log 2>/dev/null || echo "无错误日志"
+          echo ""
+          echo "=== sites-enabled 内容 ==="
+          ls -la /etc/nginx/sites-enabled/ 2>/dev/null
+          echo ""
+          echo "=== calorie-battle 配置文件 ==="
+          cat /etc/nginx/sites-available/calorie-battle 2>/dev/null | head -5
+          echo "..."
+          echo ""
+          echo "=== SSL 证书是否存在 ==="
+          ls -la /etc/letsencrypt/live/calorie.yogdunana.cn/ 2>/dev/null || echo "证书不存在!"
+          echo ""
+          echo "=== 尝试启动 Nginx ==="
+          nginx -t 2>&1
+          service nginx start 2>&1 || systemctl start nginx 2>&1 || true
+          sleep 2
+          echo ""
+          echo "=== 再次检查端口 ==="
+          ss -tlnp | grep -E ":(80|443|8080) " || echo "仍无端口监听"
+          echo ""
+          echo "=== curl 测试 ==="
+          curl -s -o /dev/null -w "80: HTTP %{http_code}\n" http://127.0.0.1:80/ 2>&1 || true
+          curl -s -o /dev/null -w "443: HTTP %{http_code}\n" https://127.0.0.1:443/ -k 2>&1 || true
+          EOF
