@@ -70,7 +70,11 @@ jobs:
             sequelize.authenticate()
               .then(() => console.log('MySQL connected successfully'))
               .then(() => sequelize.sync({ force: true }))
-              .then(() => console.log('All tables synced'))
+              .then(async () => {
+                console.log('All tables synced');
+                const [results] = await sequelize.query('SHOW TABLES');
+                console.log('Tables:', results.map(r => Object.values(r)[0]).join(', '));
+              })
               .then(async () => {
                 await require('./src/seeders/initAdmin')();
                 console.log('Admin seeder done');
