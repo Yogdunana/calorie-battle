@@ -41,8 +41,8 @@ jobs:
           echo "  Step 1: 安装基础环境"
           echo "============================================"
           export DEBIAN_FRONTEND=noninteractive
-          apt-get update -qq
-          apt-get install -y -qq curl wget git sshpass > /dev/null 2>&1
+          apt-get update -qq 2>/dev/null || true
+          apt-get install -y -qq curl wget git sshpass > /dev/null 2>&1 || true
 
           if command -v node &>/dev/null && node -v | grep -q "v20"; then
               echo "  Node.js $(node -v) ✓"
