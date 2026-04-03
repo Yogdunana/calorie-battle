@@ -1,0 +1,283 @@
+name: Remote Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '确认部署到服务器? (输入 yes)'
+        required: true
+        default: 'yes'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: sudo apt-get install -y sshpass
+
+      - name: Test SSH Connection
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+            "echo 'SSH连接成功' && uname -a && free -h | head -2"
+
+      - name: Install Dependencies on Server
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          echo "=== 安装基础工具 ==="
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq curl wget git unzip sshpass > /dev/null 2>&1
+
+          echo "=== 检查/安装 Node.js 20 ==="
+          if command -v node &>/dev/null && node -v | grep -q "v20"; then
+              echo "Node.js $(node -v) 已安装"
+          else
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+              apt-get install -y -qq nodejs
+              echo "Node.js $(node -v) 安装完成"
+          fi
+
+          echo "=== 检查/安装 MySQL ==="
+          if command -v mysql &>/dev/null; then
+              echo "MySQL 已安装"
+          else
+              apt-get install -y -qq mysql-server > /dev/null 2>&1
+          fi
+          service mysql start 2>/dev/null || systemctl start mysql 2>/dev/null || true
+          sleep 2
+
+          echo "=== 检查/安装 PM2 ==="
+          if ! command -v pm2 &>/dev/null; then
+              npm install -g pm2 > /dev/null 2>&1
+              echo "PM2 安装完成"
+          fi
+
+          echo "=== 检查/安装 Nginx ==="
+          if ! command -v nginx &>/dev/null; then
+              apt-get install -y -qq nginx > /dev/null 2>&1
+              echo "Nginx 安装完成"
+          fi
+
+          echo "=== 基础环境安装完成 ==="
+          REMOTE_SCRIPT
+
+      - name: Configure MySQL Database
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          service mysql start 2>/dev/null || systemctl start mysql 2>/dev/null || true
+          sleep 2
+          mysql -u root <<SQL
+          CREATE DATABASE IF NOT EXISTS calorie_battle CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE USER IF NOT EXISTS 'calorie'@'localhost' IDENTIFIED BY 'Calorie2026Secure!';
+          GRANT ALL PRIVILEGES ON calorie_battle.* TO 'calorie'@'localhost';
+          FLUSH PRIVILEGES;
+          SQL
+          echo "数据库配置完成"
+          REMOTE_SCRIPT
+
+      - name: Clone/Update Code
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          if [ -d "/opt/calorie-battle" ]; then
+              echo "更新代码..."
+              cd /opt/calorie-battle
+              git pull origin main
+          else
+              echo "克隆代码..."
+              git clone https://github.com/Yogdunana/calorie-battle.git /opt/calorie-battle
+          fi
+          echo "代码准备完成"
+          REMOTE_SCRIPT
+
+      - name: Install Backend Dependencies
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          cd /opt/calorie-battle/calorie-battle-server
+          npm install --production 2>&1 | tail -3
+          echo "后端依赖安装完成"
+          REMOTE_SCRIPT
+
+      - name: Configure Backend Environment
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          JWT_SECRET=$(openssl rand -hex 32)
+          JWT_REFRESH_SECRET=$(openssl rand -hex 32)
+
+          cat > /opt/calorie-battle/calorie-battle-server/.env <<EOF
+          PORT=3001
+          NODE_ENV=production
+
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_NAME=calorie_battle
+          DB_USER=calorie
+          DB_PASS=Calorie2026Secure!
+
+          JWT_SECRET=${JWT_SECRET}
+          JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+          JWT_EXPIRES_IN=24h
+          JWT_REFRESH_EXPIRES_IN=7d
+
+          UPLOAD_DIR=/opt/calorie-battle/calorie-battle-server/uploads
+          MAX_FILE_SIZE=10485760
+          EOF
+
+          mkdir -p /opt/calorie-battle/calorie-battle-server/uploads
+          echo "环境变量配置完成"
+          REMOTE_SCRIPT
+
+      - name: Build Frontend
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          echo "构建前端 (可能需要几分钟)..."
+          cd /opt/calorie-battle/calorie-battle-web
+          npm install --legacy-peer-deps 2>&1 | tail -3
+          npx vite build 2>&1 | tail -5
+          echo "前端构建完成"
+          REMOTE_SCRIPT
+
+      - name: Start Backend with PM2
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          cd /opt/calorie-battle/calorie-battle-server
+          pm2 delete calorie-battle 2>/dev/null || true
+          pm2 start server.js --name calorie-battle
+          pm2 save
+          pm2 startup 2>/dev/null | tail -1 | bash 2>/dev/null || true
+          echo "后端服务已启动"
+          sleep 3
+          pm2 status
+          REMOTE_SCRIPT
+
+      - name: Configure Nginx (Port 8080)
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          set -e
+          cat > /etc/nginx/sites-available/calorie-battle <<'NGINX'
+          server {
+              listen 8080;
+              server_name _;
+
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  proxy_read_timeout 60s;
+                  client_max_body_size 10M;
+              }
+
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          NGINX
+
+          ln -sf /etc/nginx/sites-available/calorie-battle /etc/nginx/sites-enabled/
+          rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+          nginx -t
+          service nginx restart 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+          echo "Nginx 配置完成 (端口 8080)"
+          REMOTE_SCRIPT
+
+      - name: Verify Deployment
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no \
+            -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'REMOTE_SCRIPT'
+          echo ""
+          echo "============================================"
+          echo "  验证部署状态"
+          echo "============================================"
+
+          # PM2 状态
+          echo ""
+          echo "--- PM2 ---"
+          pm2 status
+
+          # Nginx 测试
+          echo ""
+          echo "--- Nginx ---"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/)
+          echo "前端 HTTP: ${HTTP_CODE}"
+
+          # API 测试
+          echo ""
+          echo "--- API ---"
+          API_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3001/api/v1/health)
+          echo "Health API HTTP: ${API_CODE}"
+
+          # 登录测试
+          LOGIN_RESULT=$(curl -s -X POST http://127.0.0.1:3001/api/v1/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"account":"admin","password":"admin123456"}')
+          echo "管理员登录: $(echo $LOGIN_RESULT | head -c 100)"
+
+          echo ""
+          echo "============================================"
+          echo "  部署完成!"
+          echo "  访问地址: http://101.237.129.33:8080"
+          echo "  管理员: admin / admin123456"
+          echo "============================================"
+          REMOTE_SCRIPT
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo "## 🚀 远程部署结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **服务器**: \`${{ secrets.SERVER_HOST }}:${{ secrets.SERVER_PORT }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **状态**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **访问地址**: http://${{ secrets.SERVER_HOST }}:8080" >> $GITHUB_STEP_SUMMARY
+          echo "- **管理员**: admin / admin123456" >> $GITHUB_STEP_SUMMARY
