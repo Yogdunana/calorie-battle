@@ -67,13 +67,20 @@ jobs:
         run: |
           node -e "
             const sequelize = require('./src/config/database');
-            sequelize.sync({ force: true }).then(async () => {
-              console.log('DB connected and synced');
-              await require('./src/seeders/initAdmin')();
-              await require('./src/seeders/initTasks')();
-              await require('./src/seeders/initItems')();
-              await require('./src/seeders/initActivity')();
-              console.log('Seeders done');
-              process.exit(0);
-            }).catch(e => { console.error(e.message); process.exit(1); });
+            sequelize.authenticate()
+              .then(() => console.log('MySQL connected successfully'))
+              .then(() => sequelize.sync({ force: true }))
+              .then(() => console.log('All tables synced'))
+              .then(async () => {
+                await require('./src/seeders/initAdmin')();
+                console.log('Admin seeder done');
+                await require('./src/seeders/initTasks')();
+                console.log('Tasks seeder done');
+                await require('./src/seeders/initItems')();
+                console.log('Items seeder done');
+                await require('./src/seeders/initActivity')();
+                console.log('Activity seeder done');
+                process.exit(0);
+              })
+              .catch(e => { console.error('FAIL:', e.message); process.exit(1); });
           "
