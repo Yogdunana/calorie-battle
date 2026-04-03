@@ -1,4 +1,4 @@
-name: Set Admin V4
+name: Set Admin V5
 
 on:
   workflow_dispatch:
@@ -14,29 +14,17 @@ jobs:
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'OUTER_EOF'
           cd /opt/calorie-battle/calorie-battle-server
+          [ -f .env ] && export $(grep -v '^#' .env | grep -v '^$' | xargs)
 
-          # 读取.env文件中的DB配置
-          if [ -f .env ]; then
-            export $(grep -v '^#' .env | grep -v '^$' | xargs)
-          fi
-
-          echo "DB_HOST=${DB_HOST:-not set}"
-          echo "DB_NAME=${DB_NAME:-not set}"
-
-          # 用Node.js直接操作数据库
           node -e "
           require('dotenv').config();
           const config = require('./src/config');
           const { Sequelize } = require('sequelize');
 
-          // 创建临时sequelize实例
           let sequelize;
           if (config.db.dialect === 'mysql') {
             sequelize = new Sequelize(config.db.name, config.db.user, config.db.password, {
-              host: config.db.host,
-              port: config.db.port,
-              dialect: 'mysql',
-              logging: false
+              host: config.db.host, port: config.db.port, dialect: 'mysql', logging: false
             });
           } else {
             sequelize = new Sequelize({ dialect: 'sqlite', storage: config.db.storage, logging: false });
@@ -44,24 +32,43 @@ jobs:
 
           (async () => {
             try {
-              const [results] = await sequelize.query('SELECT account, username, role, status FROM Users WHERE role = \"admin\"');
-              console.log('当前admin:', JSON.stringify(results));
+              // 先查看所有表
+              const [tables] = await sequelize.query('SHOW TABLES');
+              console.log('所有表:', JSON.stringify(tables));
 
-              const [user] = await sequelize.query('SELECT account, username, role, status FROM Users WHERE account = \"1120240002\"');
+              // 尝试不同的表名
+              let tableName = 'Users';
+              try {
+                await sequelize.query('SELECT 1 FROM Users LIMIT 1');
+              } catch(e) {
+                tableName = 'users';
+                try {
+                  await sequelize.query('SELECT 1 FROM users LIMIT 1');
+                } catch(e2) {
+                  console.log('Users和users都不存在');
+                  process.exit(1);
+                }
+              }
+              console.log('使用表名:', tableName);
+
+              const [admins] = await sequelize.query('SELECT account, username, role, status FROM ' + tableName + ' WHERE role = \"admin\"');
+              console.log('当前admin:', JSON.stringify(admins));
+
+              const [user] = await sequelize.query('SELECT account, username, role, status FROM ' + tableName + ' WHERE account = \"1120240002\"');
               console.log('1120240002:', JSON.stringify(user));
 
               if (user.length > 0) {
-                await sequelize.query('UPDATE Users SET role = \"admin\", status = \"active\" WHERE account = \"1120240002\"');
+                await sequelize.query('UPDATE ' + tableName + ' SET role = \"admin\", status = \"active\" WHERE account = \"1120240002\"');
                 console.log('已将1120240002设为admin');
               } else {
-                console.log('1120240002不存在，请先注册该账号');
+                console.log('1120240002不存在');
               }
 
-              await sequelize.query('DELETE FROM Users WHERE account = \"admin\" AND account != \"1120240002\"');
-              console.log('已删除旧admin账号');
+              await sequelize.query('DELETE FROM ' + tableName + ' WHERE account = \"admin\"');
+              console.log('已删除旧admin');
 
-              const [final] = await sequelize.query('SELECT account, username, role, status FROM Users WHERE role = \"admin\"');
-              console.log('最终admin列表:', JSON.stringify(final));
+              const [final] = await sequelize.query('SELECT account, username, role, status FROM ' + tableName + ' WHERE role = \"admin\"');
+              console.log('最终admin:', JSON.stringify(final));
             } catch(e) {
               console.error('Error:', e.message);
             }
@@ -69,15 +76,11 @@ jobs:
           })();
           "
 
-          echo ""
-          echo "=== 重启后端 ==="
-          pm2 restart all 2>/dev/null
+          sleep 2
+          pm2 restart calorie-battle 2>/dev/null
           sleep 3
-
           echo ""
           echo "=== 登录测试 ==="
           curl -s http://127.0.0.1:3001/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"1120240002","password":"admin123456"}'
-
           echo ""
-          echo "=== DONE ==="
           OUTER_EOF
