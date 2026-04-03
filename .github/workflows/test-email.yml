@@ -1,0 +1,35 @@
+name: Test Email
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install nodemailer
+      - run: |
+          node -e "
+          const nodemailer = require('nodemailer');
+          const t = nodemailer.createTransport({
+            host: 'smtp.feishu.cn',
+            port: 465,
+            secure: true,
+            auth: {
+              user: 'noreply@yogdunana.com',
+              pass: '${{ secrets.SMTP_PASSWORD }}'
+            }
+          });
+          t.sendMail({
+            from: '\"卡路里大作战\" <noreply@yogdunana.com>',
+            to: 'yogdunana@yogdunana.com',
+            subject: '【卡路里大作战】邮件服务测试 ✅',
+            html: '<div style=\"max-width:480px;margin:0 auto;padding:20px;font-family:Microsoft YaHei,sans-serif;\"><div style=\"background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:12px 12px 0 0;padding:30px;text-align:center;\"><h1 style=\"color:#fff;margin:0;font-size:24px;\">🔥 卡路里大作战</h1><p style=\"color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;\">校园健身活动管理系统</p></div><div style=\"background:#fff;border:1px solid #e8e8e8;border-top:none;border-radius:0 0 12px 12px;padding:30px;\"><p style=\"color:#333;font-size:15px;\">这是一封<strong>测试邮件</strong>，用于验证邮件服务是否正常工作。</p><p style=\"color:#666;font-size:14px;margin-top:15px;\">如果您收到了这封邮件，说明邮件系统配置成功！✅</p><table style=\"width:100%;border-collapse:collapse;margin-top:20px;\"><tr style=\"background:#f7f8fc;\"><td style=\"padding:12px;color:#666;border:1px solid #eee;\">SMTP 服务器</td><td style=\"padding:12px;color:#333;border:1px solid #eee;\">smtp.feishu.cn:465</td></tr><tr><td style=\"padding:12px;color:#666;border:1px solid #eee;\">发件人</td><td style=\"padding:12px;color:#333;border:1px solid #eee;\">noreply@yogdunana.com</td></tr><tr style=\"background:#f7f8fc;\"><td style=\"padding:12px;color:#666;border:1px solid #eee;\">发送时间</td><td style=\"padding:12px;color:#333;border:1px solid #eee;\">' + new Date().toLocaleString('zh-CN') + '</td></tr></table></div><div style=\"text-align:center;padding:20px;color:#bbb;font-size:12px;\"><p>此邮件由系统自动发送，请勿回复</p></div></div>'
+          }).then(info => {
+            console.log('SUCCESS! MessageId:', info.messageId);
+          }).catch(err => {
+            console.error('FAILED:', err.message);
+            process.exit(1);
+          });
+          "
