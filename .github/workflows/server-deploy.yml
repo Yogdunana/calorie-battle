@@ -1,0 +1,219 @@
+name: Server Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: sudo apt-get install -y sshpass
+
+      - name: Package code
+        run: |
+          cd $GITHUB_WORKSPACE
+          tar czf /tmp/calorie-battle.tar.gz \
+            --exclude='node_modules' --exclude='.git' --exclude='data' \
+            --exclude='*.db' --exclude='uploads' --exclude='.trae' \
+            calorie-battle-server/ calorie-battle-web/ deploy.sh
+          ls -lh /tmp/calorie-battle.tar.gz
+
+      - name: Upload to server via SCP
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            scp -o StrictHostKeyChecking=no -P ${{ secrets.SERVER_PORT }} \
+            /tmp/calorie-battle.tar.gz \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/
+
+      - name: Deploy on server
+        run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'DEPLOY'
+          set -e
+
+          echo "============================================"
+          echo "  Step 1: 安装基础环境"
+          echo "============================================"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq curl wget git sshpass > /dev/null 2>&1
+
+          if command -v node &>/dev/null && node -v | grep -q "v20"; then
+              echo "  Node.js $(node -v) ✓"
+          else
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>/dev/null
+              apt-get install -y -qq nodejs
+              echo "  Node.js $(node -v) ✓"
+          fi
+
+          if command -v mysql &>/dev/null; then
+              echo "  MySQL ✓"
+          else
+              apt-get install -y -qq mysql-server > /dev/null 2>&1
+          fi
+          service mysql start 2>/dev/null || systemctl start mysql 2>/dev/null || true
+          sleep 2
+
+          if ! command -v pm2 &>/dev/null; then
+              npm install -g pm2 > /dev/null 2>&1
+          fi
+          echo "  PM2 ✓"
+
+          if ! command -v nginx &>/dev/null; then
+              apt-get install -y -qq nginx > /dev/null 2>&1
+          fi
+          echo "  Nginx ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 2: 解压代码"
+          echo "============================================"
+          rm -rf /opt/calorie-battle
+          mkdir -p /opt/calorie-battle
+          tar xzf /tmp/calorie-battle.tar.gz -C /opt/calorie-battle/
+          rm -f /tmp/calorie-battle.tar.gz
+          echo "  代码解压完成 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 3: 配置数据库"
+          echo "============================================"
+          mysql -u root <<SQL
+          CREATE DATABASE IF NOT EXISTS calorie_battle CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE USER IF NOT EXISTS 'calorie'@'localhost' IDENTIFIED BY 'Calorie2026Secure!';
+          GRANT ALL PRIVILEGES ON calorie_battle.* TO 'calorie'@'localhost';
+          FLUSH PRIVILEGES;
+          SQL
+          echo "  数据库配置完成 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 4: 安装后端依赖"
+          echo "============================================"
+          cd /opt/calorie-battle/calorie-battle-server
+          npm install --production 2>&1 | tail -1
+          echo "  后端依赖完成 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 5: 配置环境变量"
+          echo "============================================"
+          JWT_SECRET=$(openssl rand -hex 32)
+          JWT_REFRESH_SECRET=$(openssl rand -hex 32)
+          cat > /opt/calorie-battle/calorie-battle-server/.env <<EOF
+          PORT=3001
+          NODE_ENV=production
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_NAME=calorie_battle
+          DB_USER=calorie
+          DB_PASS=Calorie2026Secure!
+          JWT_SECRET=${JWT_SECRET}
+          JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+          JWT_EXPIRES_IN=24h
+          JWT_REFRESH_EXPIRES_IN=7d
+          UPLOAD_DIR=/opt/calorie-battle/calorie-battle-server/uploads
+          MAX_FILE_SIZE=10485760
+          EOF
+          mkdir -p /opt/calorie-battle/calorie-battle-server/uploads
+          echo "  环境变量配置完成 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 6: 构建前端"
+          echo "============================================"
+          cd /opt/calorie-battle/calorie-battle-web
+          npm install --legacy-peer-deps 2>&1 | tail -1
+          npx vite build 2>&1 | tail -3
+          echo "  前端构建完成 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 7: 启动后端 (PM2)"
+          echo "============================================"
+          cd /opt/calorie-battle/calorie-battle-server
+          pm2 delete calorie-battle 2>/dev/null || true
+          pm2 start server.js --name calorie-battle
+          pm2 save
+          pm2 startup 2>/dev/null | tail -1 | bash 2>/dev/null || true
+          echo "  等待后端启动..."
+          sleep 8
+          echo "  PM2 日志 (最近10行):"
+          pm2 logs calorie-battle --lines 10 --nostream 2>&1 || true
+          echo "  后端已启动 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 8: 配置 Nginx (端口 8080)"
+          echo "============================================"
+          cat > /etc/nginx/sites-available/calorie-battle <<'NGINX'
+          server {
+              listen 8080;
+              server_name _;
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  proxy_read_timeout 60s;
+                  client_max_body_size 10M;
+              }
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          NGINX
+          ln -sf /etc/nginx/sites-available/calorie-battle /etc/nginx/sites-enabled/
+          rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+          nginx -t 2>&1
+          service nginx restart 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+          echo "  Nginx 配置完成 ✓"
+
+          echo ""
+          echo "============================================"
+          echo "  Step 9: 验证部署"
+          echo "============================================"
+          echo ""
+          echo "--- PM2 ---"
+          pm2 status
+          echo ""
+          echo "--- 前端 (8080) ---"
+          curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:8080/ || true
+          echo ""
+          echo "--- API (3001) ---"
+          curl -s -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1:3001/api/v1/health || true
+          echo ""
+          echo "--- 登录测试 ---"
+          curl -s -X POST http://127.0.0.1:3001/api/v1/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"account":"admin","password":"admin123456"}' | head -c 200 || true
+          echo ""
+          echo ""
+          echo "============================================"
+          echo "  部署完成! 访问: http://101.237.129.33:8080"
+          echo "  管理员: admin / admin123456"
+          echo "============================================"
+          DEPLOY
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 部署结果: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 访问: http://${{ secrets.SERVER_HOST }}:8080" >> $GITHUB_STEP_SUMMARY
