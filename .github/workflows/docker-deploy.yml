@@ -38,6 +38,10 @@ jobs:
           docker compose down 2>/dev/null || true
 
           echo ""
+          echo "=== 5.1 清除Docker构建缓存 ==="
+          docker builder prune -f 2>/dev/null || true
+
+          echo ""
           echo "=== 6. 构建并启动 ==="
           docker compose up -d --build 2>&1
 
