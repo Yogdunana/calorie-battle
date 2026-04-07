@@ -10,8 +10,7 @@ uploads
 .DS_Store
 .trae
 .github
-docker-compose.yml
-Dockerfile
-Dockerfile.web
-nginx.conf
-.dockerignore
+calorie-battle-server/node_modules
+calorie-battle-web/node_modules
+calorie-battle-server/data
+calorie-battle-server/uploads
