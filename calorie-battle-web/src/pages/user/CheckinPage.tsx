@@ -1,3 +1,23 @@
+import React from 'react';
+import { Result } from 'antd';
+import { PauseCircleOutlined } from '@ant-design/icons';
+
+const CheckinPage: React.FC = () => {
+  return (
+    <div className="page-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+      <Result
+        icon={<PauseCircleOutlined style={{ color: '#faad14' }} />}
+        title="功能未开启"
+        subTitle="该功能暂未开放使用，敬请期待"
+      />
+    </div>
+  );
+};
+
+export default CheckinPage;
+
+{/* ========== 原始代码（已注释） ========== */}
+{/*
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Typography,
@@ -31,7 +51,6 @@ import dayjs from 'dayjs';
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
-/** 字段标签映射 */
 const FIELD_LABEL_MAP: Record<string, string> = {
   duration: '运动时长（分钟）',
   distance: '距离（公里）',
@@ -43,7 +62,6 @@ const FIELD_LABEL_MAP: Record<string, string> = {
   notes: '备注说明',
 };
 
-/** 字段类型映射 */
 const FIELD_TYPE_MAP: Record<string, string> = {
   duration: 'number',
   distance: 'number',
@@ -58,13 +76,11 @@ const FIELD_TYPE_MAP: Record<string, string> = {
 const CheckinPage: React.FC = () => {
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
-
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
 
-  // 获取任务列表
   const { data: tasks, isLoading: tasksLoading } = useQuery({
     queryKey: ['checkin-tasks'],
     queryFn: async () => {
@@ -73,27 +89,21 @@ const CheckinPage: React.FC = () => {
     },
   });
 
-  // 过滤出活跃任务
   const activeTasks = useMemo(() => {
     if (!tasks) return [];
-    return tasks.filter(
-      (t) => t.is_active || t.status === 'active'
-    );
+    return tasks.filter((t) => t.is_active || t.status === 'active');
   }, [tasks]);
 
-  // 当前选中的任务
   const selectedTask = useMemo(() => {
     if (!selectedTaskId || !activeTasks) return null;
     return activeTasks.find((t) => t.id === selectedTaskId) || null;
   }, [selectedTaskId, activeTasks]);
 
-  // 必填字段列表
   const requiredFields = useMemo(() => {
     if (!selectedTask?.required_fields) return [];
     return selectedTask.required_fields;
   }, [selectedTask]);
 
-  // 提交打卡
   const submitMutation = useMutation({
     mutationFn: async (formData: FormData) => {
       const res = await checkinApi.submitCheckin(formData);
@@ -109,7 +119,6 @@ const CheckinPage: React.FC = () => {
     },
   });
 
-  // 图片预览
   const handlePreview = useCallback(async (file: UploadFile) => {
     if (!file.url && !file.preview) {
       file.preview = await getBase64(file.originFileObj as File);
@@ -118,7 +127,6 @@ const CheckinPage: React.FC = () => {
     setPreviewOpen(true);
   }, []);
 
-  // 图片变更
   const handleChange: UploadProps['onChange'] = useCallback(
     ({ fileList: newFileList }: { fileList: UploadFile[] }) => {
       setFileList(newFileList);
@@ -126,11 +134,8 @@ const CheckinPage: React.FC = () => {
     []
   );
 
-  // 上传前校验
   const beforeUpload = useCallback((file: File) => {
-    const isValidType = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'].includes(
-      file.type
-    );
+    const isValidType = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'].includes(file.type);
     if (!isValidType) {
       message.error('只能上传 JPG/PNG/JPEG/WEBP 格式的图片');
       return Upload.LIST_IGNORE;
@@ -140,24 +145,20 @@ const CheckinPage: React.FC = () => {
       message.error('图片大小不能超过 10MB');
       return Upload.LIST_IGNORE;
     }
-    return false; // 阻止自动上传，仅保留本地文件
+    return false;
   }, []);
 
-  // 提交确认
   const handleSubmit = useCallback(async () => {
     try {
       const values = await form.validateFields();
-
       if (!selectedTaskId) {
         message.warning('请选择活动任务');
         return;
       }
-
       if (fileList.length === 0) {
         message.warning('请至少上传一张凭证照片');
         return;
       }
-
       Modal.confirm({
         title: '确认提交打卡',
         icon: <ExclamationCircleOutlined />,
@@ -168,9 +169,7 @@ const CheckinPage: React.FC = () => {
             {requiredFields.length > 0 && (
               <p>
                 填写信息：
-                {requiredFields
-                  .map((f) => `${FIELD_LABEL_MAP[f] || f}: ${values[f] ?? '-'}`)
-                  .join('、')}
+                {requiredFields.map((f) => `${FIELD_LABEL_MAP[f] || f}: ${values[f] ?? '-'}`).join('、')}
               </p>
             )}
             <p style={{ color: '#faad14', marginTop: 8 }}>
@@ -183,8 +182,6 @@ const CheckinPage: React.FC = () => {
         onOk: () => {
           const formData = new FormData();
           formData.append('task_id', String(selectedTaskId));
-
-          // 构建 submit_data
           const submitData: Record<string, any> = {};
           requiredFields.forEach((field) => {
             const val = values[field];
@@ -197,14 +194,11 @@ const CheckinPage: React.FC = () => {
             }
           });
           formData.append('submit_data', JSON.stringify(submitData));
-
-          // 添加图片文件
           fileList.forEach((file) => {
             if (file.originFileObj) {
               formData.append('images', file.originFileObj);
             }
           });
-
           submitMutation.mutate(formData);
         },
       });
@@ -213,14 +207,12 @@ const CheckinPage: React.FC = () => {
     }
   }, [form, selectedTaskId, selectedTask, fileList, requiredFields, submitMutation]);
 
-  // 重置表单
   const handleReset = useCallback(() => {
     form.resetFields();
     setSelectedTaskId(null);
     setFileList([]);
   }, [form]);
 
-  // 任务切换时重置表单字段
   const handleTaskChange = useCallback(
     (taskId: number) => {
       setSelectedTaskId(taskId);
@@ -229,95 +221,42 @@ const CheckinPage: React.FC = () => {
     [form]
   );
 
-  // 渲染动态表单项
   const renderDynamicFields = () => {
     if (requiredFields.length === 0) return null;
-
     return (
-      <Card
-        title="填写打卡信息"
-        size="small"
-        style={{ marginTop: 16 }}
-      >
-        <Form.Item
-          label="活动说明"
-          style={{ marginBottom: 16 }}
-        >
+      <Card title="填写打卡信息" size="small" style={{ marginTop: 16 }}>
+        <Form.Item label="活动说明" style={{ marginBottom: 16 }}>
           {selectedTask?.description ? (
-            <Alert
-              message={selectedTask.description}
-              type="info"
-              showIcon
-            />
+            <Alert message={selectedTask.description} type="info" showIcon />
           ) : (
             <Text type="secondary">暂无说明</Text>
           )}
         </Form.Item>
-
         {requiredFields.map((field) => {
           const fieldType = FIELD_TYPE_MAP[field] || 'text';
           const label = FIELD_LABEL_MAP[field] || field;
-
           switch (fieldType) {
             case 'number':
               return (
-                <Form.Item
-                  key={field}
-                  name={field}
-                  label={label}
-                  rules={[{ required: true, message: `请填写${label}` }]}
-                >
-                  <InputNumber
-                    min={0}
-                    step={field === 'distance' ? 0.01 : 1}
-                    precision={field === 'distance' ? 2 : 0}
-                    placeholder={`请输入${label}`}
-                    style={{ width: '100%' }}
-                  />
+                <Form.Item key={field} name={field} label={label} rules={[{ required: true, message: `请填写${label}` }]}>
+                  <InputNumber min={0} step={field === 'distance' ? 0.01 : 1} precision={field === 'distance' ? 2 : 0} placeholder={`请输入${label}`} style={{ width: '100%' }} />
                 </Form.Item>
               );
             case 'datetime':
               return (
-                <Form.Item
-                  key={field}
-                  name={field}
-                  label={label}
-                  rules={[{ required: true, message: `请选择${label}` }]}
-                  extra="请最晚于跑步完成后1天内上传，否则不予通过"
-                >
-                  <DatePicker
-                    showTime
-                    format="YYYY-MM-DD HH:mm:ss"
-                    placeholder={`请选择${label}`}
-                    disabledDate={(current) => current && current > dayjs().endOf('day')}
-                    style={{ width: '100%' }}
-                  />
+                <Form.Item key={field} name={field} label={label} rules={[{ required: true, message: `请选择${label}` }]} extra="请最晚于跑步完成后1天内上传，否则不予通过">
+                  <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" placeholder={`请选择${label}`} disabledDate={(current) => current && current > dayjs().endOf('day')} style={{ width: '100%' }} />
                 </Form.Item>
               );
             case 'text':
               return (
-                <Form.Item
-                  key={field}
-                  name={field}
-                  label={label}
-                  rules={[{ required: true, message: `请填写${label}` }]}
-                >
-                  <TextArea
-                    rows={3}
-                    placeholder={`请输入${label}`}
-                    maxLength={500}
-                    showCount
-                  />
+                <Form.Item key={field} name={field} label={label} rules={[{ required: true, message: `请填写${label}` }]}>
+                  <TextArea rows={3} placeholder={`请输入${label}`} maxLength={500} showCount />
                 </Form.Item>
               );
             default:
               return (
-                <Form.Item
-                  key={field}
-                  name={field}
-                  label={label}
-                  rules={[{ required: true, message: `请填写${label}` }]}
-                >
+                <Form.Item key={field} name={field} label={label} rules={[{ required: true, message: `请填写${label}` }]}>
                   <Input placeholder={`请输入${label}`} />
                 </Form.Item>
               );
@@ -327,7 +266,6 @@ const CheckinPage: React.FC = () => {
     );
   };
 
-  // 上传按钮
   const uploadButton = (
     <div>
       <PlusOutlined />
@@ -350,58 +288,30 @@ const CheckinPage: React.FC = () => {
       <div className="page-header">
         <Title level={3}>打卡提交</Title>
       </div>
-
-      {/* 强制提示文案 */}
-      <Alert
-        type="warning"
-        showIcon
-        icon={<ExclamationCircleOutlined />}
-        style={{ marginBottom: 24 }}
-        message={
-          <div>
-            <p style={{ margin: 0 }}>
-              <strong>注意事项：</strong>
-            </p>
-            <p style={{ margin: '4px 0 0 0' }}>
-              1. 选择的活动与积分类型不匹配不得分
-            </p>
-            <p style={{ margin: '4px 0 0 0' }}>
-              2. 跑步打卡需包含的核心要素：时长、距离、跑步完成时间（请最晚于跑步完成后1天内上传，否则不予通过）
-            </p>
-          </div>
-        }
-      />
-
+      <Alert type="warning" showIcon icon={<ExclamationCircleOutlined />} style={{ marginBottom: 24 }} message={
+        <div>
+          <p style={{ margin: 0 }}><strong>注意事项：</strong></p>
+          <p style={{ margin: '4px 0 0 0' }}>1. 选择的活动与积分类型不匹配不得分</p>
+          <p style={{ margin: '4px 0 0 0' }}>2. 跑步打卡需包含的核心要素：时长、距离、跑步完成时间（请最晚于跑步完成后1天内上传，否则不予通过）</p>
+        </div>
+      } />
       <Form form={form} layout="vertical">
-        {/* 步骤1：选择活动任务 */}
         <Card title="选择活动任务" size="small">
           {activeTasks.length === 0 ? (
             <Empty description="暂无可用的活动任务" />
           ) : (
-            <Form.Item
-              name="task_id"
-              label="活动任务"
-              rules={[{ required: true, message: '请选择活动任务' }]}
-            >
-              <Select
-                placeholder="请选择要打卡的活动任务"
-                size="large"
-                onChange={handleTaskChange}
-                options={activeTasks.map((task: Task) => ({
-                  value: task.id,
-                  label: (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>{task.name}</span>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {task.points} 积分
-                      </Text>
-                    </div>
-                  ),
-                }))}
-              />
+            <Form.Item name="task_id" label="活动任务" rules={[{ required: true, message: '请选择活动任务' }]}>
+              <Select placeholder="请选择要打卡的活动任务" size="large" onChange={handleTaskChange} options={activeTasks.map((task: Task) => ({
+                value: task.id,
+                label: (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{task.name}</span>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{task.points} 积分</Text>
+                  </div>
+                ),
+              }))} />
             </Form.Item>
           )}
-
           {selectedTask && (
             <div style={{ marginTop: 12 }}>
               <Text type="secondary">
@@ -409,71 +319,31 @@ const CheckinPage: React.FC = () => {
                 可获得 <Text strong style={{ color: '#1677ff' }}>{selectedTask.points}</Text> 积分
               </Text>
               {selectedTask.description && (
-                <Paragraph
-                  type="secondary"
-                  style={{ marginTop: 8, marginBottom: 0 }}
-                  ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}
-                >
+                <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
                   {selectedTask.description}
                 </Paragraph>
               )}
             </div>
           )}
         </Card>
-
-        {/* 步骤2：上传照片凭证 */}
         <Card title="上传照片凭证" size="small" style={{ marginTop: 16 }}>
-          <Upload
-            listType="picture-card"
-            fileList={fileList}
-            onPreview={handlePreview}
-            onChange={handleChange}
-            beforeUpload={beforeUpload}
-            accept=".jpg,.jpeg,.png,.webp"
-            maxCount={5}
-            multiple
-          >
+          <Upload listType="picture-card" fileList={fileList} onPreview={handlePreview} onChange={handleChange} beforeUpload={beforeUpload} accept=".jpg,.jpeg,.png,.webp" maxCount={5} multiple>
             {fileList.length >= 5 ? null : uploadButton}
           </Upload>
           <Text type="secondary" style={{ fontSize: 12 }}>
             支持 JPG/PNG/JPEG/WEBP 格式，单张不超过 10MB，最多上传 5 张
           </Text>
         </Card>
-
-        {/* 步骤3：动态填写信息 */}
         {renderDynamicFields()}
-
-        {/* 提交按钮 */}
         <div style={{ marginTop: 24, textAlign: 'center' }}>
           <Space size="middle">
-            <Button size="large" onClick={handleReset}>
-              重置
-            </Button>
-            <Button
-              type="primary"
-              size="large"
-              icon={<CheckCircleOutlined />}
-              loading={submitMutation.isPending}
-              onClick={handleSubmit}
-            >
-              提交打卡
-            </Button>
+            <Button size="large" onClick={handleReset}>重置</Button>
+            <Button type="primary" size="large" icon={<CheckCircleOutlined />} loading={submitMutation.isPending} onClick={handleSubmit}>提交打卡</Button>
           </Space>
         </div>
       </Form>
-
-      {/* 图片预览弹窗 */}
-      <Modal
-        open={previewOpen}
-        title="图片预览"
-        footer={null}
-        onCancel={() => setPreviewOpen(false)}
-      >
-        <img
-          alt="预览"
-          style={{ width: '100%' }}
-          src={previewImage}
-        />
+      <Modal open={previewOpen} title="图片预览" footer={null} onCancel={() => setPreviewOpen(false)}>
+        <img alt="预览" style={{ width: '100%' }} src={previewImage} />
       </Modal>
     </div>
   );
@@ -489,3 +359,4 @@ function getBase64(file: File): Promise<string> {
 }
 
 export default CheckinPage;
+*/}

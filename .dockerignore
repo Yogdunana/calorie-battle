@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+data
+*.db
+uploads
+.env
+.env.local
+*.log
+.DS_Store
+.trae
+.github
+docker-compose.yml
+Dockerfile
+Dockerfile.web
+nginx.conf
+.dockerignore

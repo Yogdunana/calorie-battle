@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Typography,
   Card,
@@ -14,6 +14,13 @@ import {
   Spin,
   message,
   Descriptions,
+  Row,
+  Col,
+  Statistic,
+  InputNumber,
+  Form,
+  Divider,
+  Tooltip,
 } from 'antd';
 import {
   UploadOutlined,
@@ -23,6 +30,12 @@ import {
   ClockCircleOutlined,
   InfoCircleOutlined,
   MedicineBoxOutlined,
+  AimOutlined,
+  FallOutlined,
+  RiseOutlined,
+  DashboardOutlined,
+  EditOutlined,
+  SaveOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { weightPlanApi } from '@/services/weightPlanApi';
@@ -30,6 +43,16 @@ import { formatDateTime } from '@/utils/format';
 import { UPLOAD_BASE_URL } from '@/utils/constants';
 import type { WeightRecord } from '@/types/user.types';
 import type { UploadFile } from 'antd';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -46,12 +69,32 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
   rejected: { label: '已驳回', color: 'red', icon: <CloseCircleOutlined /> },
 };
 
+/** localStorage key for target weight */
+const TARGET_WEIGHT_KEY = 'weight_plan_target_weight';
+const TARGET_HEIGHT_KEY = 'weight_plan_target_height';
+
 const WeightPlanPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [initialFileList, setInitialFileList] = useState<UploadFile[]>([]);
   const [finalFileList, setFinalFileList] = useState<UploadFile[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
+
+  // 目标体重（本地存储）
+  const [targetWeight, setTargetWeight] = useState<number | null>(() => {
+    const saved = localStorage.getItem(TARGET_WEIGHT_KEY);
+    return saved ? parseFloat(saved) : null;
+  });
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [tempTargetWeight, setTempTargetWeight] = useState<number | null>(targetWeight);
+
+  // 目标身高（本地存储，用于计算 BMI）
+  const [targetHeight, setTargetHeight] = useState<number | null>(() => {
+    const saved = localStorage.getItem(TARGET_HEIGHT_KEY);
+    return saved ? parseFloat(saved) : null;
+  });
+  const [editingHeight, setEditingHeight] = useState(false);
+  const [tempTargetHeight, setTempTargetHeight] = useState<number | null>(targetHeight);
 
   // 获取我的记录
   const { data: recordsData, isLoading: recordsLoading } = useQuery({
@@ -61,7 +104,51 @@ const WeightPlanPage: React.FC = () => {
 
   const records = recordsData?.data ?? [];
 
-  // 判断是否已提交过某种类型（后端返回的记录可能包含 record_type 字段）
+  // 过滤出已审核通过的记录，用于图表和统计
+  const approvedRecords = useMemo(() => {
+    return records
+      .filter((r) => r.status === 'approved')
+      .sort((a, b) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return timeA - timeB; // 按时间正序
+      });
+  }, [records]);
+
+  // 图表数据
+  const chartData = useMemo(() => {
+    return approvedRecords.map((record) => ({
+      date: record.created_at
+        ? new Date(record.created_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+        : '-',
+      weight: record.current_weight,
+      bodyFat: record.body_fat ?? undefined,
+    }));
+  }, [approvedRecords]);
+
+  // 统计数据
+  const stats = useMemo(() => {
+    if (approvedRecords.length === 0) {
+      return { initialWeight: null, currentWeight: null, weightChange: null, bmi: null };
+    }
+    const first = approvedRecords[0];
+    const last = approvedRecords[approvedRecords.length - 1];
+    const weightChange = last.current_weight - first.current_weight;
+    const height = last.height ?? targetHeight;
+    let bmi: number | null = null;
+    if (height && height > 0) {
+      const heightM = height / 100;
+      bmi = parseFloat((last.current_weight / (heightM * heightM)).toFixed(1));
+    }
+    return {
+      initialWeight: first.current_weight,
+      currentWeight: last.current_weight,
+      weightChange,
+      bmi,
+    };
+  }, [approvedRecords, targetHeight]);
+
+  // 判断是否已提交过某种类型
   const hasInitial = useMemo(
     () => records.some((r) => (r as any).record_type === 'initial'),
     [records]
@@ -115,7 +202,7 @@ const WeightPlanPage: React.FC = () => {
       message.error('图片大小不能超过 10MB');
       return Upload.LIST_IGNORE;
     }
-    return false; // 阻止自动上传
+    return false;
   }, []);
 
   // 提交截图
@@ -153,6 +240,26 @@ const WeightPlanPage: React.FC = () => {
     },
     [initialFileList, finalFileList, submitMutation]
   );
+
+  // 保存目标体重
+  const handleSaveTargetWeight = () => {
+    if (tempTargetWeight !== null && tempTargetWeight > 0) {
+      localStorage.setItem(TARGET_WEIGHT_KEY, String(tempTargetWeight));
+      setTargetWeight(tempTargetWeight);
+      setEditingTarget(false);
+      message.success('目标体重已保存');
+    }
+  };
+
+  // 保存身高
+  const handleSaveHeight = () => {
+    if (tempTargetHeight !== null && tempTargetHeight > 0) {
+      localStorage.setItem(TARGET_HEIGHT_KEY, String(tempTargetHeight));
+      setTargetHeight(tempTargetHeight);
+      setEditingHeight(false);
+      message.success('身高已保存');
+    }
+  };
 
   // 渲染时间线颜色
   const getTimelineColor = (status: string): string => {
@@ -240,6 +347,13 @@ const WeightPlanPage: React.FC = () => {
                       <Descriptions.Item label="目标体重">
                         <Text strong>{record.target_weight} kg</Text>
                       </Descriptions.Item>
+                      {record.body_fat !== undefined && record.body_fat !== null && (
+                        <Descriptions.Item label="体脂率">
+                          <Text strong style={{ color: '#52c41a' }}>
+                            {record.body_fat}%
+                          </Text>
+                        </Descriptions.Item>
+                      )}
                       {record.height && (
                         <Descriptions.Item label="身高">
                           {record.height} cm
@@ -291,11 +405,253 @@ const WeightPlanPage: React.FC = () => {
     );
   };
 
+  // 判断是否有体脂数据
+  const hasBodyFatData = approvedRecords.some((r) => r.body_fat !== undefined && r.body_fat !== null);
+
   return (
     <div className="page-container">
       <div className="page-header">
         <Title level={3}>轻盈计划</Title>
       </div>
+
+      {/* ========== 统计卡片区域 ========== */}
+      {approvedRecords.length > 0 && (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col xs={12} sm={6}>
+            <Card hoverable style={{ borderRadius: 12, background: 'linear-gradient(135deg, #f0f5ff 0%, #e6f4ff 100%)' }}>
+              <Statistic
+                title="初始体重"
+                value={stats.initialWeight ?? '-'}
+                suffix="kg"
+                prefix={<DashboardOutlined />}
+                valueStyle={{ color: '#1677ff', fontWeight: 700 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable style={{ borderRadius: 12, background: 'linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)' }}>
+              <Statistic
+                title="当前体重"
+                value={stats.currentWeight ?? '-'}
+                suffix="kg"
+                prefix={<MedicineBoxOutlined />}
+                valueStyle={{ color: '#52c41a', fontWeight: 700 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable style={{ borderRadius: 12, background: stats.weightChange !== null && stats.weightChange < 0 ? 'linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)' : 'linear-gradient(135deg, #fff2f0 0%, #ffccc7 100%)' }}>
+              <Statistic
+                title="体重变化"
+                value={stats.weightChange ?? '-'}
+                suffix="kg"
+                prefix={stats.weightChange !== null && stats.weightChange < 0 ? <FallOutlined /> : <RiseOutlined />}
+                valueStyle={{
+                  color: stats.weightChange !== null && stats.weightChange < 0 ? '#52c41a' : '#ff4d4f',
+                  fontWeight: 700,
+                }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable style={{ borderRadius: 12, background: 'linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%)' }}>
+              <Statistic
+                title="BMI"
+                value={stats.bmi ?? '-'}
+                prefix={<AimOutlined />}
+                valueStyle={{
+                  color: stats.bmi !== null
+                    ? stats.bmi < 18.5 ? '#1677ff'
+                      : stats.bmi < 24 ? '#52c41a'
+                        : stats.bmi < 28 ? '#faad14'
+                          : '#ff4d4f'
+                    : '#999',
+                  fontWeight: 700,
+                }}
+              />
+              {stats.bmi !== null && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {stats.bmi < 18.5 ? '偏瘦' : stats.bmi < 24 ? '正常' : stats.bmi < 28 ? '偏胖' : '肥胖'}
+                </Text>
+              )}
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* ========== 体重趋势图表 ========== */}
+      {approvedRecords.length >= 2 && (
+        <Card
+          title={
+            <Space>
+              <RiseOutlined />
+              <span>体重趋势</span>
+            </Space>
+          }
+          style={{ marginBottom: 24, borderRadius: 12 }}
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="weightGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#1677ff" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#1677ff" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="bodyFatGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#52c41a" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#52c41a" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis yAxisId="weight" tick={{ fontSize: 12 }} label={{ value: '体重(kg)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }} />
+              {hasBodyFatData && (
+                <YAxis yAxisId="bodyFat" orientation="right" tick={{ fontSize: 12 }} label={{ value: '体脂率(%)', angle: 90, position: 'insideRight', style: { fontSize: 12 } }} />
+              )}
+              <RechartsTooltip
+                contentStyle={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
+              />
+              <Legend />
+              <Area
+                yAxisId="weight"
+                type="monotone"
+                dataKey="weight"
+                name="体重(kg)"
+                stroke="#1677ff"
+                strokeWidth={2}
+                fill="url(#weightGradient)"
+                dot={{ r: 4, fill: '#1677ff' }}
+                activeDot={{ r: 6 }}
+              />
+              {hasBodyFatData && (
+                <Area
+                  yAxisId="bodyFat"
+                  type="monotone"
+                  dataKey="bodyFat"
+                  name="体脂率(%)"
+                  stroke="#52c41a"
+                  strokeWidth={2}
+                  fill="url(#bodyFatGradient)"
+                  dot={{ r: 4, fill: '#52c41a' }}
+                  activeDot={{ r: 6 }}
+                />
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {/* ========== 目标设置卡片 ========== */}
+      <Card
+        title={
+          <Space>
+            <AimOutlined />
+            <span>目标设置</span>
+          </Space>
+        }
+        style={{ marginBottom: 24, borderRadius: 12 }}
+      >
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 13 }}>目标体重</Text>
+                <div style={{ marginTop: 4 }}>
+                  {editingTarget ? (
+                    <Space>
+                      <InputNumber
+                        value={tempTargetWeight}
+                        onChange={(val) => setTempTargetWeight(val)}
+                        min={30}
+                        max={200}
+                        step={0.1}
+                        precision={1}
+                        suffix="kg"
+                        style={{ width: 140 }}
+                        autoFocus
+                      />
+                      <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSaveTargetWeight}>
+                        保存
+                      </Button>
+                      <Button size="small" onClick={() => { setEditingTarget(false); setTempTargetWeight(targetWeight); }}>
+                        取消
+                      </Button>
+                    </Space>
+                  ) : (
+                    <Space>
+                      <Text strong style={{ fontSize: 24, color: '#1677ff' }}>
+                        {targetWeight ? `${targetWeight} kg` : '未设置'}
+                      </Text>
+                      <Tooltip title="设置目标体重">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<EditOutlined />}
+                          onClick={() => { setTempTargetWeight(targetWeight); setEditingTarget(true); }}
+                        />
+                      </Tooltip>
+                    </Space>
+                  )}
+                </div>
+              </div>
+            </div>
+            {targetWeight && stats.currentWeight !== null && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  距离目标还需减重{' '}
+                  <Text strong style={{ color: stats.currentWeight - targetWeight > 0 ? '#ff4d4f' : '#52c41a' }}>
+                    {Math.abs(parseFloat((stats.currentWeight - targetWeight).toFixed(1)))} kg
+                  </Text>
+                </Text>
+              </div>
+            )}
+          </Col>
+          <Col xs={24} sm={12}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 13 }}>我的身高（用于计算 BMI）</Text>
+                <div style={{ marginTop: 4 }}>
+                  {editingHeight ? (
+                    <Space>
+                      <InputNumber
+                        value={tempTargetHeight}
+                        onChange={(val) => setTempTargetHeight(val)}
+                        min={100}
+                        max={250}
+                        step={0.1}
+                        precision={1}
+                        suffix="cm"
+                        style={{ width: 140 }}
+                        autoFocus
+                      />
+                      <Button type="primary" size="small" icon={<SaveOutlined />} onClick={handleSaveHeight}>
+                        保存
+                      </Button>
+                      <Button size="small" onClick={() => { setEditingHeight(false); setTempTargetHeight(targetHeight); }}>
+                        取消
+                      </Button>
+                    </Space>
+                  ) : (
+                    <Space>
+                      <Text strong style={{ fontSize: 24, color: '#722ed1' }}>
+                        {targetHeight ? `${targetHeight} cm` : '未设置'}
+                      </Text>
+                      <Tooltip title="设置身高">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<EditOutlined />}
+                          onClick={() => { setTempTargetHeight(targetHeight); setEditingHeight(true); }}
+                        />
+                      </Tooltip>
+                    </Space>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Col>
+        </Row>
+      </Card>
 
       {/* 活动规则说明 */}
       <Alert

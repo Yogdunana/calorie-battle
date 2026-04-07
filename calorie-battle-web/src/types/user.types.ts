@@ -14,6 +14,7 @@ export interface WeightRecord {
   current_weight: number;
   target_weight: number;
   height?: number;
+  body_fat?: number;
   start_date?: string;
   image_url?: string;
   status: 'pending' | 'approved' | 'rejected';

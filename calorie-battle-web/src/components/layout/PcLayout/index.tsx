@@ -39,11 +39,11 @@ const { Header, Sider, Content } = Layout;
 /** 用户端菜单 */
 const userMenuItems: MenuProps['items'] = [
   { key: '/user/home', icon: <HomeOutlined />, label: '首页' },
-  { key: '/user/checkin', icon: <CheckSquareOutlined />, label: '打卡提交' },
-  { key: '/user/reviews', icon: <AuditOutlined />, label: '审核进度' },
-  { key: '/user/points', icon: <StarOutlined />, label: '积分管理' },
-  { key: '/user/redemption', icon: <GiftOutlined />, label: '积分兑换' },
-  { key: '/user/ranking', icon: <TrophyOutlined />, label: '排行榜' },
+  // { key: '/user/checkin', icon: <CheckSquareOutlined />, label: '打卡提交' },  // 功能未开启，已隐藏
+  // { key: '/user/reviews', icon: <AuditOutlined />, label: '审核进度' },  // 功能未开启，已隐藏
+  // { key: '/user/points', icon: <StarOutlined />, label: '积分管理' },  // 功能未开启，已隐藏
+  // { key: '/user/redemption', icon: <GiftOutlined />, label: '积分兑换' },  // 功能未开启，已隐藏
+  // { key: '/user/ranking', icon: <TrophyOutlined />, label: '排行榜' },  // 功能未开启，已隐藏
   { key: '/user/weight-plan', icon: <HeartOutlined />, label: '轻盈计划' },
   { key: '/user/photos', icon: <CameraOutlined />, label: '健身掠影' },
 ];
