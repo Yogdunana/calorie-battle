@@ -1,0 +1,107 @@
+name: Restore Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sshpass
+      - run: |
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'cat > /tmp/deploy.sh << '\''SCRIPT'\''
+          #!/bin/bash
+          set +e
+
+          echo "=== 1. 停止Docker容器 ==="
+          cd /opt/calorie-battle-docker 2>/dev/null && docker compose down 2>&1
+
+          echo "=== 2. 准备目录 ==="
+          rm -rf /opt/calorie-battle
+          mkdir -p /opt/calorie-battle
+          cd /opt/calorie-battle
+
+          echo "=== 3. 拉取代码 ==="
+          git clone https://github.com/Yogdunana/calorie-battle.git . 2>&1 | tail -5
+
+          echo "=== 4. 安装后端依赖 ==="
+          cd /opt/calorie-battle/calorie-battle-server
+          npm install --production 2>&1 | tail -5
+
+          echo "=== 5. 安装前端依赖并构建 ==="
+          cd /opt/calorie-battle/calorie-battle-web
+          npm install 2>&1 | tail -3
+          npx vite build --mode production 2>&1 | tail -5
+
+          echo "=== 6. 配置nginx ==="
+          rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+          cat > /etc/nginx/sites-available/calorie-battle << '\''NGINX'\''
+          server {
+              listen 8080;
+              server_name _;
+              client_max_body_size 10M;
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_read_timeout 60s;
+              }
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          server {
+              listen 80;
+              server_name calorie.yogdunana.cn;
+              client_max_body_size 10M;
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_read_timeout 60s;
+              }
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          NGINX
+          ln -sf /etc/nginx/sites-available/calorie-battle /etc/nginx/sites-enabled/calorie-battle
+          nginx -t 2>&1 && systemctl restart nginx 2>&1
+
+          echo "=== 7. 启动后端 ==="
+          cd /opt/calorie-battle/calorie-battle-server
+          pm2 delete calorie-battle 2>/dev/null
+          pm2 start server.js --name calorie-battle 2>&1
+          sleep 5
+
+          echo "=== 8. 验证 ==="
+          curl -s -o /dev/null -w "8080: %{http_code}\n" http://127.0.0.1:8080/
+          curl -s -o /dev/null -w "API: %{http_code}\n" http://127.0.0.1:8080/api/v1/health
+          curl -s -o /dev/null -w "域名: %{http_code}\n" http://127.0.0.1:80/
+
+          echo "=== DONE ==="
+          SCRIPT
+          chmod +x /tmp/deploy.sh'
+
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash /tmp/deploy.sh'
