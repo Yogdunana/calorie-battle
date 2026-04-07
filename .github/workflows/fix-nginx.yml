@@ -12,32 +12,90 @@ jobs:
       - run: |
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
-          echo "=== Nginx 状态 ==="
-          service nginx status 2>&1 || systemctl status nginx 2>&1 || true
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'OUTER_EOF'
+          echo "=== 1. 检查nginx配置 ==="
+          nginx -t 2>&1 || echo "nginx配置有误"
+
           echo ""
-          echo "=== Nginx 错误日志 ==="
-          tail -20 /var/log/nginx/error.log 2>/dev/null || echo "无错误日志"
-          echo ""
-          echo "=== sites-enabled 内容 ==="
+          echo "=== 2. 检查当前nginx配置文件 ==="
+          cat /etc/nginx/sites-available/calorie-battle 2>/dev/null | head -5 || echo "配置文件不存在"
           ls -la /etc/nginx/sites-enabled/ 2>/dev/null
+
           echo ""
-          echo "=== calorie-battle 配置文件 ==="
-          cat /etc/nginx/sites-available/calorie-battle 2>/dev/null | head -5
-          echo "..."
+          echo "=== 3. 检查PM2状态 ==="
+          pm2 list 2>/dev/null
+
           echo ""
-          echo "=== SSL 证书是否存在 ==="
-          ls -la /etc/letsencrypt/live/calorie.yogdunana.cn/ 2>/dev/null || echo "证书不存在!"
+          echo "=== 4. 检查3001端口 ==="
+          curl -s -o /dev/null -w "3001: %{http_code}\n" http://127.0.0.1:3001/api/v1/health
+
           echo ""
-          echo "=== 尝试启动 Nginx ==="
+          echo "=== 5. 检查8080端口 ==="
+          curl -s -o /dev/null -w "8080: %{http_code}\n" http://127.0.0.1:8080/
+
+          echo ""
+          echo "=== 6. 修复nginx ==="
+          # 删除旧配置，写入新的简单配置
+          rm -f /etc/nginx/sites-enabled/calorie-battle 2>/dev/null
+          
+          # 检查是否有SSL证书
+          HAS_SSL=0
+          if [ -f /etc/letsencrypt/live/calorie.yogdunana.cn/fullchain.pem ]; then
+            HAS_SSL=1
+            echo "SSL证书存在"
+          else
+            echo "SSL证书不存在"
+          fi
+
+          # 写入8080端口配置（最简单可靠）
+          cat > /etc/nginx/sites-available/calorie-battle << 'NGINX'
+          server {
+              listen 8080;
+              server_name _;
+              client_max_body_size 10M;
+
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_read_timeout 60s;
+              }
+
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          NGINX
+
+          ln -sf /etc/nginx/sites-available/calorie-battle /etc/nginx/sites-enabled/calorie-battle
+
+          # 删除default配置避免冲突
+          rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+
+          echo ""
+          echo "=== 7. 测试nginx配置 ==="
           nginx -t 2>&1
-          service nginx start 2>&1 || systemctl start nginx 2>&1 || true
+
+          echo ""
+          echo "=== 8. 重启nginx ==="
+          systemctl restart nginx 2>&1 || service nginx restart 2>&1
           sleep 2
+
           echo ""
-          echo "=== 再次检查端口 ==="
-          ss -tlnp | grep -E ":(80|443|8080) " || echo "仍无端口监听"
+          echo "=== 9. 验证 ==="
+          curl -s -o /dev/null -w "8080: %{http_code}\n" http://127.0.0.1:8080/
+          curl -s -o /dev/null -w "API: %{http_code}\n" http://127.0.0.1:8080/api/v1/health
+          curl -s http://127.0.0.1:8080/ | grep -o "深北莫计协" | head -1
+
           echo ""
-          echo "=== curl 测试 ==="
-          curl -s -o /dev/null -w "80: HTTP %{http_code}\n" http://127.0.0.1:80/ 2>&1 || true
-          curl -s -o /dev/null -w "443: HTTP %{http_code}\n" https://127.0.0.1:443/ -k 2>&1 || true
-          EOF
+          echo "=== DONE ==="
+          OUTER_EOF
