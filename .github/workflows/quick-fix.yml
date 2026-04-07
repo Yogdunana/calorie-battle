@@ -9,45 +9,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y sshpass
-      - name: Diagnose and fix
-        run: |
+      - run: |
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'EOF'
-          echo "===1. Nginx进程==="
-          ps aux | grep nginx | grep -v grep | head -2
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'cat > /tmp/fix.sh << '\''SCRIPT'\''
+          #!/bin/bash
+          echo "=== PM2状态 ==="
+          pm2 list 2>&1
+
+          echo "=== PM2日志 ==="
+          pm2 logs calorie-battle --lines 30 --nostream 2>&1
+
+          echo "=== .env文件 ==="
+          cat /opt/calorie-battle/calorie-battle-server/.env 2>/dev/null || echo "无.env"
+
+          echo "=== MySQL连接测试 ==="
+          if [ -f /opt/calorie-battle/calorie-battle-server/.env ]; then
+            export $(grep -v '^#' /opt/calorie-battle/calorie-battle-server/.env | grep -v '^$' | xargs)
+            echo "DB_HOST=$DB_HOST DB_NAME=$DB_NAME DB_PORT=$DB_PORT"
+            if command -v mysql &>/dev/null; then
+              mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1" 2>&1
+            else
+              echo "mysql客户端未安装"
+              # 用node测试
+              cd /opt/calorie-battle/calorie-battle-server
+              node -e "
+              const mysql = require('mysql2/promise');
+              (async () => {
+                try {
+                  const conn = await mysql.createConnection({host:process.env.DB_HOST,port:parseInt(process.env.DB_PORT||3306),user:process.env.DB_USER,password:process.env.DB_PASS,database:process.env.DB_NAME});
+                  console.log('MySQL连接成功!');
+                  const [rows] = await conn.execute('SELECT COUNT(*) as cnt FROM users');
+                  console.log('用户数:', rows[0].cnt);
+                  await conn.end();
+                } catch(e) { console.error('MySQL连接失败:', e.message); }
+              })();
+              " 2>&1
+            fi
+          fi
+
+          echo "=== 重启PM2 ==="
+          cd /opt/calorie-battle/calorie-battle-server
+          pm2 restart calorie-battle 2>&1
+          sleep 5
+
+          echo "=== 验证 ==="
+          curl -s http://127.0.0.1:3001/api/v1/health 2>&1
           echo ""
-          echo "===2. 监听端口==="
-          ss -tlnp | grep -E ":(80|443|8080|3001) "
-          echo ""
-          echo "===3. 本地curl==="
-          curl -sk -o /dev/null -w "443:%{http_code} " https://127.0.0.1:443/ 2>/dev/null || echo "443:FAIL "
-          curl -s -o /dev/null -w "80:%{http_code} " http://127.0.0.1:80/ 2>/dev/null || echo "80:FAIL "
-          curl -s -o /dev/null -w "8080:%{http_code} " http://127.0.0.1:8080/ 2>/dev/null || echo "8080:FAIL "
-          curl -s -o /dev/null -w "3001:%{http_code}" http://127.0.0.1:3001/api/v1/health 2>/dev/null || echo "3001:FAIL"
-          echo ""
-          echo "===4. PM2==="
-          pm2 status 2>/dev/null || echo "PM2未运行"
-          echo ""
-          echo "===5. SSL证书==="
-          ls /etc/letsencrypt/live/calorie.yogdunana.cn/ 2>/dev/null || echo "无证书"
-          echo ""
-          echo "===6. iptables==="
-          iptables -L INPUT -n 2>/dev/null | head -10 || echo "无iptables"
-          echo ""
-          echo "===7. 修复Nginx==="
-          nginx -t 2>&1
-          systemctl restart nginx 2>&1 || service nginx restart 2>&1
-          sleep 2
-          echo "===8. 修复后端口==="
-          ss -tlnp | grep -E ":(80|443|8080) "
-          echo ""
-          echo "===9. 修复后curl==="
-          curl -sk -o /dev/null -w "443:%{http_code} " https://127.0.0.1:443/ 2>/dev/null || echo "443:FAIL "
-          curl -s -o /dev/null -w "80:%{http_code} " http://127.0.0.1:80/ 2>/dev/null || echo "80:FAIL "
-          curl -s -o /dev/null -w "8080:%{http_code}" http://127.0.0.1:8080/ 2>/dev/null || echo "8080:FAIL"
-          echo ""
-          echo "===10. 外部端口测试(从服务器出)==="
-          timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/443' 2>/dev/null && echo "443:可连接" || echo "443:不可连接"
-          timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/80' 2>/dev/null && echo "80:可连接" || echo "80:不可连接"
-          EOF
+          curl -s -o /dev/null -w "8080: %{http_code}\n" http://127.0.0.1:8080/api/v1/health
+
+          echo "=== DONE ==="
+          SCRIPT
+          chmod +x /tmp/fix.sh'
+
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash /tmp/fix.sh'
