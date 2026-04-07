@@ -15,7 +15,16 @@ const start = async () => {
     if (config.isDev) {
       await sequelize.sync({ force: true });
     } else {
-      await sequelize.sync();
+      // 生产环境：使用 alter 模式，忽略已存在的列错误
+      try {
+        await sequelize.sync({ alter: true });
+      } catch (err) {
+        if (err.message && err.message.includes('Duplicate column')) {
+          console.log('Sync: duplicate column warning, skipping...');
+        } else {
+          throw err;
+        }
+      }
     }
 
     await seedAdmin();

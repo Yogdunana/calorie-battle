@@ -91,7 +91,17 @@ jobs:
           FLUSH PRIVILEGES;
           -- 添加 email 列（忽略已存在的错误）
           USE calorie_battle;
-          ALTER TABLE users ADD COLUMN email VARCHAR(100) DEFAULT NULL UNIQUE AFTER avatar;
+          SET @dbname = DATABASE();
+          SET @tablename = 'users';
+          SET @columnname = 'email';
+          SET @preparedStatement = (SELECT IF(
+            (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+            'SELECT 1',
+            'ALTER TABLE users ADD COLUMN email VARCHAR(100) DEFAULT NULL UNIQUE AFTER avatar'
+          ));
+          PREPARE alterIfNotExists FROM @preparedStatement;
+          EXECUTE alterIfNotExists;
+          DEALLOCATE PREPARE alterIfNotExists;
           SQL
           echo "  数据库配置完成 ✓" || echo "  数据库配置完成（email列可能已存在）✓"
 
@@ -144,6 +154,8 @@ jobs:
           echo "============================================"
           echo "  Step 8: 配置 Nginx"
           echo "============================================"
+          # 生成 nginx 配置（SSL证书存在时才配置HTTPS）
+          if [ -f /etc/letsencrypt/live/calorie.yogdunana.cn/fullchain.pem ]; then
           cat > /etc/nginx/sites-available/calorie-battle <<'NGINX'
           # HTTPS - 域名
           server {
@@ -182,6 +194,40 @@ jobs:
               server_name calorie.yogdunana.cn;
               return 301 https://$host$request_uri;
           }
+          NGINX
+          echo "  SSL证书存在，已配置HTTPS ✓"
+          else
+          cat > /etc/nginx/sites-available/calorie-battle <<'NGINX'
+          # HTTP - 域名（无SSL证书，直接HTTP提供服务）
+          server {
+              listen 80;
+              server_name calorie.yogdunana.cn;
+              location / {
+                  root /opt/calorie-battle/calorie-battle-web/dist;
+                  index index.html;
+                  try_files $uri $uri/ /index.html;
+              }
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  proxy_read_timeout 60s;
+                  client_max_body_size 10M;
+              }
+              location /uploads/ {
+                  alias /opt/calorie-battle/calorie-battle-server/uploads/;
+                  expires 30d;
+              }
+          }
+          NGINX
+          echo "  无SSL证书，仅配置HTTP ✓"
+          fi
           # 兼容 8080 端口
           server {
               listen 8080;
