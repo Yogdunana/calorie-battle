@@ -110,7 +110,7 @@ jobs:
           echo "  Step 4: 安装后端依赖"
           echo "============================================"
           cd /opt/calorie-battle/calorie-battle-server
-          npm install --production 2>&1 | tail -1
+          npm install 2>&1 | tail -1
           echo "  后端依赖完成 ✓"
 
           echo ""
