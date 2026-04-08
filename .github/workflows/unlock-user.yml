@@ -1,35 +1,51 @@
-name: Unlock User
+name: Reset Password
 
 on:
   workflow_dispatch:
 
 jobs:
-  unlock:
+  reset:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y sshpass
       - run: |
-          cat > /tmp/unlock.sh << 'LOCALEOF'
+          cat > /tmp/reset.sh << 'LOCALEOF'
           #!/bin/bash
           cd /opt/calorie-battle/calorie-battle-server
           [ -f .env ] && export $(grep -v '^#' .env | grep -v '^$' | xargs)
           node -e "
+          const bcrypt = require('bcryptjs');
           const mysql = require('mysql2/promise');
           (async () => {
+            const hash = await bcrypt.hash('bill6666', 10);
             const conn = await mysql.createConnection({host:process.env.DB_HOST,port:parseInt(process.env.DB_PORT||3306),user:process.env.DB_USER,password:process.env.DB_PASS,database:process.env.DB_NAME});
-            await conn.execute('UPDATE users SET status=\"active\", login_fail_count=0, locked_until=NULL WHERE account=\"1120240002\"');
-            const [rows] = await conn.execute('SELECT account, status, login_fail_count, locked_until FROM users WHERE account=\"1120240002\"');
-            console.log(JSON.stringify(rows[0]));
+            await conn.execute('UPDATE users SET password_hash=?, status=\"active\", login_fail_count=0, locked_until=NULL WHERE account=\"1120240002\"', [hash]);
+            const [rows] = await conn.execute('SELECT account, status, login_fail_count FROM users WHERE account=\"1120240002\"');
+            console.log('密码重置成功:', JSON.stringify(rows[0]));
             await conn.end();
           })();
           "
+          echo "=== 验证登录 ==="
+          curl -s http://127.0.0.1:3001/api/v1/auth/login -X POST -H "Content-Type: application/json" -d '{"account":"1120240002","password":"bill6666"}'
+          echo ""
+          echo "=== DONE ==="
           LOCALEOF
 
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             scp -o StrictHostKeyChecking=no -P ${{ secrets.SERVER_PORT }} \
-            /tmp/unlock.sh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/unlock.sh
+            /tmp/reset.sh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/reset.sh
 
           sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
             ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash /tmp/unlock.sh'
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash /tmp/reset.sh'
+      - name: Trigger Deploy
+        run: |
+          sleep 15
+          curl -s -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/Yogdunana/calorie-battle/actions/workflows/server-deploy.yml/dispatches \
+            -d '{"ref":"main"}'
+      - name: Wait and Verify
+        run: sleep 300 && curl -s -o /dev/null -w "前端: %{http_code}\n" http://101.237.129.33:8080/ && curl -s -o /dev/null -w "API: %{http_code}\n" http://101.237.129.33:8080/api/v1/health
