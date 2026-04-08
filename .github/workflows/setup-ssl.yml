@@ -10,31 +10,50 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y sshpass
       - run: |
-          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
-            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash -s' << 'OUTER_EOF'
-          echo "=== 1. 安装certbot ==="
-          apt-get update -qq
-          apt-get install -y -qq certbot python3-certbot-nginx 2>&1 | tail -3
+          cat > /tmp/ssl.sh << 'LOCALEOF'
+          #!/bin/bash
+          set +e
+
+          echo "=== 1. 安装acme.sh ==="
+          curl https://get.acme.sh | sh -s email=noreply@yogdunana.com 2>&1 | tail -5
+          export PATH="$HOME/.acme.sh:$PATH"
 
           echo ""
-          echo "=== 2. 检查nginx是否运行 ==="
-          systemctl is-active nginx
+          echo "=== 2. 停止nginx(释放80端口) ==="
+          systemctl stop nginx 2>&1
 
           echo ""
-          echo "=== 3. 先配置80端口让域名可访问 ==="
+          echo "=== 3. 申请证书 ==="
+          ~/.acme.sh/acme.sh --issue -d calorie.yogdunana.cn --standalone --httpport 80 --force 2>&1
+
+          echo ""
+          echo "=== 4. 安装证书 ==="
+          mkdir -p /etc/nginx/ssl
+          ~/.acme.sh/acme.sh --install-cert -d calorie.yogdunana.cn \
+            --key-file /etc/nginx/ssl/calorie.yogdunana.cn.key \
+            --fullchain-file /etc/nginx/ssl/calorie.yogdunana.cn.crt \
+            --reloadcmd "systemctl reload nginx" 2>&1
+
+          echo ""
+          echo "=== 5. 配置nginx HTTPS ==="
           cat > /etc/nginx/sites-available/calorie-battle << 'NGINX'
+          # HTTP -> HTTPS 重定向
           server {
               listen 80;
               server_name calorie.yogdunana.cn;
-              client_max_body_size 10M;
+              return 301 https://$server_name$request_uri;
+          }
 
+          # IP直接访问(HTTP)
+          server {
+              listen 8080;
+              server_name _;
+              client_max_body_size 10M;
               location / {
                   root /opt/calorie-battle/calorie-battle-web/dist;
                   index index.html;
                   try_files $uri $uri/ /index.html;
               }
-
               location /api/ {
                   proxy_pass http://127.0.0.1:3001;
                   proxy_http_version 1.1;
@@ -43,57 +62,62 @@ jobs:
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_read_timeout 60s;
               }
-
               location /uploads/ {
                   alias /opt/calorie-battle/calorie-battle-server/uploads/;
                   expires 30d;
               }
           }
 
+          # HTTPS
           server {
-              listen 8080;
-              server_name _;
+              listen 443 ssl;
+              server_name calorie.yogdunana.cn;
               client_max_body_size 10M;
+
+              ssl_certificate /etc/nginx/ssl/calorie.yogdunana.cn.crt;
+              ssl_certificate_key /etc/nginx/ssl/calorie.yogdunana.cn.key;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers HIGH:!aNULL:!MD5;
 
               location / {
                   root /opt/calorie-battle/calorie-battle-web/dist;
                   index index.html;
                   try_files $uri $uri/ /index.html;
               }
-
               location /api/ {
                   proxy_pass http://127.0.0.1:3001;
                   proxy_http_version 1.1;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
                   proxy_read_timeout 60s;
               }
-
               location /uploads/ {
                   alias /opt/calorie-battle/calorie-battle-server/uploads/;
                   expires 30d;
               }
           }
           NGINX
-          ln -sf /etc/nginx/sites-available/calorie-battle /etc/nginx/sites-enabled/calorie-battle
-          rm -f /etc/nginx/sites-enabled/default 2>/dev/null
-          nginx -t 2>&1 && systemctl reload nginx
-          echo "nginx配置完成"
 
           echo ""
-          echo "=== 4. 申请SSL证书 ==="
-          certbot --nginx -d calorie.yogdunana.cn --non-interactive --agree-tos --email noreply@yogdunana.com --redirect 2>&1
+          echo "=== 6. 测试并启动nginx ==="
+          nginx -t 2>&1
+          systemctl start nginx 2>&1
 
           echo ""
-          echo "=== 5. 验证证书 ==="
-          ls -la /etc/letsencrypt/live/calorie.yogdunana.cn/ 2>/dev/null
-
-          echo ""
-          echo "=== 6. 验证HTTPS ==="
+          echo "=== 7. 验证 ==="
           curl -s -o /dev/null -w "HTTP: %{http_code}\n" http://calorie.yogdunana.cn/
           curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://calorie.yogdunana.cn/
+          curl -s -o /dev/null -w "8080: %{http_code}\n" http://127.0.0.1:8080/
 
-          echo ""
           echo "=== DONE ==="
-          OUTER_EOF
+          LOCALEOF
+
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            scp -o StrictHostKeyChecking=no -P ${{ secrets.SERVER_PORT }} \
+            /tmp/ssl.sh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/ssl.sh
+
+          sshpass -p '${{ secrets.SERVER_SSH_PASSWORD }}' \
+            ssh -o StrictHostKeyChecking=no -p ${{ secrets.SERVER_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} 'bash /tmp/ssl.sh'
